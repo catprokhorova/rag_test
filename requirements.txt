@@ -1,0 +1,14 @@
+fastapi
+uvicorn[standard]
+requests
+tenacity
+tqdm
+qdrant-client
+sentence-transformers
+transformers
+torch
+beautifulsoup4
+lxml
+mwparserfromhell
+accelerate
+httpx

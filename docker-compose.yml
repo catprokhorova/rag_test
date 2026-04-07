@@ -1,0 +1,47 @@
+services:
+  qdrant:
+    image: qdrant/qdrant:latest
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_storage:/qdrant/storage
+
+  rag:
+    build:
+      context: .
+      dockerfile: Dockerfile.rag
+    depends_on:
+      - qdrant
+    environment:
+      - QDRANT_HOST=qdrant
+      - QDRANT_PORT=6333
+      - QDRANT_COLLECTION=moodle_docs
+      - DATA_DIR=/data
+      - EMBED_MODEL=sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2
+      - LLM_MODEL=google/flan-t5-base
+      - RETRIEVE_TOP_K=8
+      - CHUNK_MAX_CHARS=3000
+      - CHUNK_OVERLAP_CHARS=400
+    ports:
+      - "8001:8001"
+    volumes:
+      - hf_cache:/hf
+      - data_dir:/data
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    depends_on:
+      - rag
+    environment:
+      - RAG_BASE_URL=http://rag:8001
+    ports:
+      - "8000:8000"
+
+volumes:
+  qdrant_storage:
+  hf_cache:
+  data_dir:
+
