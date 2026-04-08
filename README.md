@@ -90,7 +90,7 @@ python -m src.prep.ingest_moodle_docs --from-local-dir /path/to/local_pages --re
 ## 2) Индексация чанков в Qdrant
 
 ```bash
-python -m src.db_utils.index_qdrant --recreate-collection
+python -m src.backend.scripts.index_qdrant --recreate-collection
 ```
 
 Если коллекцию пересоздавать не нужно — уберите `--recreate-collection`.
@@ -98,7 +98,7 @@ python -m src.db_utils.index_qdrant --recreate-collection
 ## 3) Запуск REST API
 
 ```bash
-uvicorn src.api.app:app --host 0.0.0.0 --port 8000
+uvicorn src.backend.api.facade.main:app --host 0.0.0.0 --port 8000
 ```
 
 Health:
@@ -124,7 +124,8 @@ python -m src.eval.run_eval
 ## Структура проекта
 
 - `src/prep/`: выгрузка Moodle docs, чистка текста, chunking
-- `src/db_utils/`: Qdrant collection и индексация
+- `src/backend/infrastructure/`: интеграции и внешние хранилища (Qdrant)
+- `src/backend/scripts/`: backend-скрипты (индексация)
 - `src/rag/`: embeddings, retriever, generator
-- `src/api/`: FastAPI сервер
+- `src/backend/api/`: API-контракты и entrypoints (`facade` и `rag`)
 - `src/eval/`: прогон тестовых запросов

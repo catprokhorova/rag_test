@@ -5,13 +5,13 @@ from typing import Dict, Iterable, List
 
 from tqdm import tqdm
 
+from src.backend.infrastructure.vector_store.qdrant_store import QdrantStore
 from src.config import settings
-from src.db_utils.qdrant_store import QdrantStore
 
 
 def iter_chunks_jsonl(path: Path) -> Iterable[Dict]:
-    with path.open("r", encoding="utf-8") as f:
-        for line in f:
+    with path.open("r", encoding="utf-8") as file:
+        for line in file:
             line = line.strip()
             if not line:
                 continue
@@ -20,15 +20,19 @@ def iter_chunks_jsonl(path: Path) -> Iterable[Dict]:
 
 def build_argparser() -> argparse.ArgumentParser:
     cfg = settings()
-    p = argparse.ArgumentParser(description="Embed Moodle chunks and index them into local Qdrant.")
-    p.add_argument(
+    parser = argparse.ArgumentParser(
+        description="Embed Moodle chunks and index them into local Qdrant."
+    )
+    parser.add_argument(
         "--chunks-jsonl",
         type=Path,
         default=cfg.data_dir / "processed" / "moodle_chunks.jsonl",
     )
-    p.add_argument("--batch-size", type=int, default=cfg.embedding_batch_size)
-    p.add_argument("--recreate-collection", action="store_true", help="Drop and recreate collection.")
-    return p
+    parser.add_argument("--batch-size", type=int, default=cfg.embedding_batch_size)
+    parser.add_argument(
+        "--recreate-collection", action="store_true", help="Drop and recreate collection."
+    )
+    return parser
 
 
 def main() -> None:
@@ -38,14 +42,12 @@ def main() -> None:
     if not args.chunks_jsonl.exists():
         raise FileNotFoundError(f"Chunks file not found: {args.chunks_jsonl}")
 
-    # Local embeddings (no external services).
     from src.rag.embeddings import SentenceTransformerEmbedder
 
     embedder = SentenceTransformerEmbedder(model_name=cfg.embed_model)
     store = QdrantStore()
 
     if args.recreate_collection:
-        # Optional collection reset for clean re-index.
         store.client.delete_collection(store.collection_name)
 
     store.ensure_collection(vector_size=embedder.embedding_dimension)
@@ -90,4 +92,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

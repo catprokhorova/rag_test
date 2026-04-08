@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence
 
 from qdrant_client import QdrantClient
 from qdrant_client.http import models as qmodels
@@ -30,11 +30,8 @@ class QdrantStore:
         self.collection_name = collection_name or cfg.qdrant_collection
 
     def ensure_collection(self, *, vector_size: int) -> None:
-        """
-        Create a collection if it doesn't exist.
-        """
         existing = self.client.get_collections().collections
-        if any(c.name == self.collection_name for c in existing):
+        if any(collection.name == self.collection_name for collection in existing):
             return
 
         self.client.create_collection(
@@ -53,8 +50,8 @@ class QdrantStore:
         ids: Sequence[str],
     ) -> None:
         points = []
-        for vec, payload, pid in zip(vectors, payloads, ids):
-            points.append(qmodels.PointStruct(id=pid, vector=vec, payload=payload))
+        for vec, payload, point_id in zip(vectors, payloads, ids):
+            points.append(qmodels.PointStruct(id=point_id, vector=vec, payload=payload))
         self.client.upsert(collection_name=self.collection_name, points=points)
 
     def search(
@@ -72,17 +69,16 @@ class QdrantStore:
             with_payload=True,
         )
         chunks: List[RetrievedChunk] = []
-        for r in results:
-            payload = r.payload or {}
+        for result in results:
+            payload = result.payload or {}
             chunks.append(
                 RetrievedChunk(
-                    chunk_id=str(payload.get("chunk_id") or r.id),
+                    chunk_id=str(payload.get("chunk_id") or result.id),
                     page_title=str(payload.get("page_title") or ""),
                     url=str(payload.get("url") or ""),
                     chunk_index=int(payload.get("chunk_index") or 0),
                     text=str(payload.get("text") or ""),
-                    score=float(r.score or 0.0),
+                    score=float(result.score or 0.0),
                 )
             )
         return chunks
-

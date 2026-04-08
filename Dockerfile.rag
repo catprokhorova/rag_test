@@ -24,5 +24,5 @@ ENV HF_HOME=/hf \
 
 EXPOSE 8001
 
-CMD ["uvicorn", "src.api.app:app", "--host", "0.0.0.0", "--port", "8001"]
+CMD ["uvicorn", "src.backend.api.rag.main:app", "--host", "0.0.0.0", "--port", "8001"]
 

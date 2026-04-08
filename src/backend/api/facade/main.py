@@ -1,11 +1,10 @@
 import os
 import uuid
-from typing import Optional
 
 import httpx
 from fastapi import FastAPI, HTTPException
 
-from src.api.schemas import ChatRequest, ChatResponse
+from src.backend.api.contracts.schemas import ChatRequest, ChatResponse
 
 
 app = FastAPI(title="Backend API (facade) for Moodle RAG Bot")
@@ -21,7 +20,6 @@ def health() -> dict:
 @app.post("/chat", response_model=ChatResponse)
 def chat(req: ChatRequest) -> ChatResponse:
     session_id = req.session_id or str(uuid.uuid4())
-
     payload = {
         "session_id": session_id,
         "message": req.message,
@@ -30,15 +28,15 @@ def chat(req: ChatRequest) -> ChatResponse:
 
     try:
         with httpx.Client(timeout=120) as client:
-            r = client.post(f"{RAG_BASE_URL}/chat", json=payload)
-    except httpx.RequestError as e:
-        raise HTTPException(status_code=502, detail=f"RAG service unavailable: {e}") from e
+            response = client.post(f"{RAG_BASE_URL}/chat", json=payload)
+    except httpx.RequestError as exc:
+        raise HTTPException(status_code=502, detail=f"RAG service unavailable: {exc}") from exc
 
-    if r.status_code != 200:
-        raise HTTPException(status_code=502, detail=f"RAG error ({r.status_code}): {r.text}")
+    if response.status_code != 200:
+        raise HTTPException(
+            status_code=502, detail=f"RAG error ({response.status_code}): {response.text}"
+        )
 
-    data = r.json()
-    # Ensure session_id is stable (backend may create it when absent).
+    data = response.json()
     data["session_id"] = session_id
     return ChatResponse.model_validate(data)
-

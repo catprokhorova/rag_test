@@ -1,7 +1,6 @@
 import argparse
 from typing import List
 
-from src.api.schemas import SourceItem
 from src.rag.generator import LocalTextGenerator
 from src.rag.retriever import QdrantRetriever
 

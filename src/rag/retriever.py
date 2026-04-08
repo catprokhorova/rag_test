@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from typing import List, Optional, Sequence
 
 from src.config import settings
-from src.db_utils.qdrant_store import QdrantStore, RetrievedChunk
+from src.backend.infrastructure.vector_store.qdrant_store import QdrantStore, RetrievedChunk
 from src.rag.embeddings import SentenceTransformerEmbedder
 
 
