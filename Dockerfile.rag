@@ -5,7 +5,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-# System deps for lxml/bs4 and (optionally) torch wheels
+# System deps for lxml/bs4 and llama-cpp-python build
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     libxml2 \

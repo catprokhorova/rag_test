@@ -18,8 +18,11 @@ services:
       - QDRANT_PORT=6333
       - QDRANT_COLLECTION=moodle_docs
       - DATA_DIR=/data
-      - EMBED_MODEL=sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2
-      - LLM_MODEL=google/flan-t5-base
+      - EMBED_MODEL=intfloat/multilingual-e5-small
+      - LLM_BACKEND=llama_cpp
+      - LLM_GGUF_PATH=/models/qwen2.5-3b-instruct-q4_k_m.gguf
+      - LLM_CTX=2048
+      - LLM_THREADS=4
       - RETRIEVE_TOP_K=8
       - CHUNK_MAX_CHARS=3000
       - CHUNK_OVERLAP_CHARS=400
@@ -27,6 +30,7 @@ services:
       - "8001:8001"
     volumes:
       - hf_cache:/hf
+      - ./models:/models:ro
       - data_dir:/data
 
   backend:
