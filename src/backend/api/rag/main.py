@@ -1,9 +1,17 @@
+from pathlib import Path
 import uuid
 from typing import Dict, List, Optional, Tuple
 
 from fastapi import FastAPI, HTTPException
 
-from src.backend.api.contracts.schemas import ChatRequest, ChatResponse
+from src.backend.api.contracts.schemas import (
+    ChatRequest,
+    ChatResponse,
+    IngestRequest,
+    IngestResponse,
+)
+from src.backend.scripts.index_qdrant import index_chunks
+from src.prep.ingest_moodle_docs import ingest
 from src.rag.generator import LocalTextGenerator
 from src.rag.retriever import QdrantRetriever
 from src.config import settings
@@ -69,4 +77,37 @@ def chat(req: ChatRequest) -> ChatResponse:
             }
             for source in retrieved.sources()
         ],
+    )
+
+
+@app.post("/admin/ingest", response_model=IngestResponse)
+def admin_ingest(req: IngestRequest) -> IngestResponse:
+    global _retriever
+    cfg = settings()
+    chunks_jsonl = Path(cfg.data_dir) / "processed" / "moodle_chunks.jsonl"
+    cache_dir = Path(cfg.data_dir) / "cache" / "wiki_pages"
+
+    try:
+        ingest(
+            toc_title=req.toc_title,
+            max_pages=req.max_pages,
+            output_jsonl=chunks_jsonl,
+            cache_dir=cache_dir,
+            from_local_dir=None,
+            resume=req.resume,
+        )
+        indexed_chunks = index_chunks(
+            chunks_jsonl=chunks_jsonl,
+            batch_size=cfg.embedding_batch_size,
+            recreate_collection=req.recreate_collection,
+        )
+        # Ensure the retriever points to freshly indexed data.
+        _retriever = QdrantRetriever()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Ingestion failed: {exc}") from exc
+
+    return IngestResponse(
+        status="ok",
+        chunks_jsonl=str(chunks_jsonl),
+        indexed_chunks=indexed_chunks,
     )

@@ -10,10 +10,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     libxml2 \
     libxslt1.1 \
+    gcc-12 \
+    g++-12 \
     && rm -rf /var/lib/apt/lists/*
 
-COPY requirements.txt /app/requirements.txt
-RUN pip install --no-cache-dir -r /app/requirements.txt
+ENV CC=gcc-12
+ENV CXX=g++-12
+
+COPY requirements.rag.txt /app/requirements.rag.txt
+RUN pip install --no-cache-dir -r /app/requirements.rag.txt
 
 COPY src /app/src
 
@@ -25,4 +30,3 @@ ENV HF_HOME=/hf \
 EXPOSE 8001
 
 CMD ["uvicorn", "src.backend.api.rag.main:app", "--host", "0.0.0.0", "--port", "8001"]
-

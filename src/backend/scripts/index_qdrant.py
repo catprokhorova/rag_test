@@ -18,6 +18,62 @@ def iter_chunks_jsonl(path: Path) -> Iterable[Dict]:
             yield json.loads(line)
 
 
+def index_chunks(*, chunks_jsonl: Path, batch_size: int, recreate_collection: bool) -> int:
+    cfg = settings()
+    if not chunks_jsonl.exists():
+        raise FileNotFoundError(f"Chunks file not found: {chunks_jsonl}")
+
+    from src.rag.embeddings import SentenceTransformerEmbedder
+
+    embedder = SentenceTransformerEmbedder(model_name=cfg.embed_model)
+    store = QdrantStore()
+
+    if recreate_collection:
+        store.client.delete_collection(store.collection_name)
+
+    store.ensure_collection(vector_size=embedder.embedding_dimension)
+
+    batch_texts: List[str] = []
+    batch_payloads: List[Dict] = []
+    batch_ids: List[str] = []
+    indexed = 0
+
+    def flush_batch() -> None:
+        nonlocal batch_texts, batch_payloads, batch_ids, indexed
+        if not batch_texts:
+            return
+
+        vectors = embedder.embed_texts(batch_texts)
+        store.upsert_embeddings(
+            vectors=vectors,
+            payloads=batch_payloads,
+            ids=batch_ids,
+        )
+        indexed += len(batch_texts)
+        batch_texts = []
+        batch_payloads = []
+        batch_ids = []
+
+    for chunk in tqdm(iter_chunks_jsonl(chunks_jsonl), desc="index chunks"):
+        chunk_id = chunk["chunk_id"]
+        batch_ids.append(chunk_id)
+        batch_texts.append(chunk["text"])
+        batch_payloads.append(
+            {
+                "chunk_id": chunk_id,
+                "page_title": chunk.get("page_title", ""),
+                "url": chunk.get("url", ""),
+                "chunk_index": chunk.get("chunk_index", 0),
+                "text": chunk["text"],
+            }
+        )
+        if len(batch_texts) >= batch_size:
+            flush_batch()
+
+    flush_batch()
+    return indexed
+
+
 def build_argparser() -> argparse.ArgumentParser:
     cfg = settings()
     parser = argparse.ArgumentParser(
@@ -37,57 +93,11 @@ def build_argparser() -> argparse.ArgumentParser:
 
 def main() -> None:
     args = build_argparser().parse_args()
-    cfg = settings()
-
-    if not args.chunks_jsonl.exists():
-        raise FileNotFoundError(f"Chunks file not found: {args.chunks_jsonl}")
-
-    from src.rag.embeddings import SentenceTransformerEmbedder
-
-    embedder = SentenceTransformerEmbedder(model_name=cfg.embed_model)
-    store = QdrantStore()
-
-    if args.recreate_collection:
-        store.client.delete_collection(store.collection_name)
-
-    store.ensure_collection(vector_size=embedder.embedding_dimension)
-
-    batch_texts: List[str] = []
-    batch_payloads: List[Dict] = []
-    batch_ids: List[str] = []
-
-    def flush_batch() -> None:
-        nonlocal batch_texts, batch_payloads, batch_ids
-        if not batch_texts:
-            return
-
-        vectors = embedder.embed_texts(batch_texts)
-        store.upsert_embeddings(
-            vectors=vectors,
-            payloads=batch_payloads,
-            ids=batch_ids,
-        )
-        batch_texts = []
-        batch_payloads = []
-        batch_ids = []
-
-    for chunk in tqdm(iter_chunks_jsonl(args.chunks_jsonl), desc="index chunks"):
-        chunk_id = chunk["chunk_id"]
-        batch_ids.append(chunk_id)
-        batch_texts.append(chunk["text"])
-        batch_payloads.append(
-            {
-                "chunk_id": chunk_id,
-                "page_title": chunk.get("page_title", ""),
-                "url": chunk.get("url", ""),
-                "chunk_index": chunk.get("chunk_index", 0),
-                "text": chunk["text"],
-            }
-        )
-        if len(batch_texts) >= args.batch_size:
-            flush_batch()
-
-    flush_batch()
+    index_chunks(
+        chunks_jsonl=args.chunks_jsonl,
+        batch_size=args.batch_size,
+        recreate_collection=args.recreate_collection,
+    )
 
 
 if __name__ == "__main__":

@@ -45,6 +45,14 @@ curl -X POST http://localhost:8000/chat \
   -d '{"session_id":"demo","message":"Как создать новый курс в Moodle?","language":"auto"}'
 ```
 
+### Запуск ingestion через API (для Bruno/curl)
+
+```bash
+curl -X POST http://localhost:8000/admin/ingest \
+  -H "Content-Type: application/json" \
+  -d '{"max_pages":50,"resume":true,"recreate_collection":true}'
+```
+
 ## 1) Выгрузка и подготовка документации (offline ingestion)
 
 Скрипт использует MediaWiki API (а не HTML-скрейпинг), чтобы снизить шанс капчи.

@@ -25,13 +25,13 @@ class Settings:
     # LLM generation (must run locally)
     llm_backend: str = os.getenv("LLM_BACKEND", "llama_cpp")
     # llama.cpp backend: path to local GGUF file
-    llm_gguf_path: str = os.getenv("LLM_GGUF_PATH", "models/qwen2.5-3b-instruct-q4_k_m.gguf")
-
+    llm_gguf_path: str = os.getenv("LLM_GGUF_PATH")
+    llm_model: str = os.getenv("LLM_MODEL", "qwen2.5-3b-instruct-q4_k_m")
     llm_max_new_tokens: int = int(os.getenv("LLM_MAX_NEW_TOKENS", "256"))
     llm_max_input_tokens: int = int(os.getenv("LLM_MAX_INPUT_TOKENS", "1024"))
     llm_temperature: float = float(os.getenv("LLM_TEMPERATURE", "0.1"))
     llm_repetition_penalty: float = float(os.getenv("LLM_REPETITION_PENALTY", "1.1"))
-    llm_ctx: int = int(os.getenv("LLM_CTX", "2048"))
+    llm_ctx: int = int(os.getenv("LLM_CTX", "8192"))
     llm_threads: int = int(os.getenv("LLM_THREADS", "4"))
 
     # Retrieval

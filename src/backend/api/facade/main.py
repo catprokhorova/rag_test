@@ -4,7 +4,12 @@ import uuid
 import httpx
 from fastapi import FastAPI, HTTPException
 
-from src.backend.api.contracts.schemas import ChatRequest, ChatResponse
+from src.backend.api.contracts.schemas import (
+    ChatRequest,
+    ChatResponse,
+    IngestRequest,
+    IngestResponse,
+)
 
 
 app = FastAPI(title="Backend API (facade) for Moodle RAG Bot")
@@ -40,3 +45,19 @@ def chat(req: ChatRequest) -> ChatResponse:
     data = response.json()
     data["session_id"] = session_id
     return ChatResponse.model_validate(data)
+
+
+@app.post("/admin/ingest", response_model=IngestResponse)
+def admin_ingest(req: IngestRequest) -> IngestResponse:
+    try:
+        with httpx.Client(timeout=3600) as client:
+            response = client.post(f"{RAG_BASE_URL}/admin/ingest", json=req.model_dump())
+    except httpx.RequestError as exc:
+        raise HTTPException(status_code=502, detail=f"RAG service unavailable: {exc}") from exc
+
+    if response.status_code != 200:
+        raise HTTPException(
+            status_code=502, detail=f"RAG error ({response.status_code}): {response.text}"
+        )
+
+    return IngestResponse.model_validate(response.json())

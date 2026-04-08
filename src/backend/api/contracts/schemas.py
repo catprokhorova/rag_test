@@ -25,3 +25,22 @@ class ChatResponse(BaseModel):
     session_id: str
     answer: str
     sources: List[SourceItem]
+
+
+class IngestRequest(BaseModel):
+    toc_title: str = Field("Table_of_Contents", description="Moodle docs TOC page title.")
+    max_pages: Optional[int] = Field(
+        None, description="Limit pages for quick ingestion tests."
+    )
+    resume: bool = Field(
+        True, description="Resume using ingest_state.json and append chunks."
+    )
+    recreate_collection: bool = Field(
+        False, description="Drop and recreate Qdrant collection before indexing."
+    )
+
+
+class IngestResponse(BaseModel):
+    status: str
+    chunks_jsonl: str
+    indexed_chunks: int

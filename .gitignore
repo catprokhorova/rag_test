@@ -1,4 +1,10 @@
 **/__pycache__
-data/
+
+# Volumes
+data_dir/
 qdrant_storage/
+models/
+hf_cache/
+
+# Environment
 .env
