@@ -11,13 +11,13 @@ from src.backend.api.contracts.schemas import (
     IngestResponse,
 )
 from src.backend.scripts.index_qdrant import index_chunks
-from src.prep.ingest_moodle_docs import ingest
+from src.prep.ingest_docs import ingest
 from src.rag.generator import LocalTextGenerator
 from src.rag.retriever import QdrantRetriever
 from src.config import settings
 
 
-app = FastAPI(title="Moodle RAG Bot (local, offline)")
+app = FastAPI(title="Docs RAG Bot (local, offline)")
 
 _sessions: Dict[str, List[Tuple[str, str]]] = {}
 _retriever: Optional[QdrantRetriever] = None
@@ -84,16 +84,14 @@ def chat(req: ChatRequest) -> ChatResponse:
 def admin_ingest(req: IngestRequest) -> IngestResponse:
     global _retriever
     cfg = settings()
-    chunks_jsonl = Path(cfg.data_dir) / "processed" / "moodle_chunks.jsonl"
-    cache_dir = Path(cfg.data_dir) / "cache" / "wiki_pages"
+    chunks_jsonl = Path(cfg.data_dir) / "processed" / "docs_chunks.jsonl"
 
     try:
         ingest(
-            toc_title=req.toc_title,
+            start_urls=req.start_urls,
+            allowed_prefixes=req.allowed_prefixes,
             max_pages=req.max_pages,
             output_jsonl=chunks_jsonl,
-            cache_dir=cache_dir,
-            from_local_dir=None,
             resume=req.resume,
         )
         indexed_chunks = index_chunks(

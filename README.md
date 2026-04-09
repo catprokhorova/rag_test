@@ -1,51 +1,86 @@
 # rag_test
 
-Локальный чат-бот поддержки Moodle LMS с RAG (выгрузка документации Moodle -> Qdrant -> поиск релевантных фрагментов -> генерация ответов локальной HF-моделью).
+Local RAG chatbot for LangChain/LangGraph documentation (docs ingestion -> Qdrant -> retrieval -> local generation).
 
-## Требования
+## Requirements
 
 - Python 3.10+
-- Локально доступный runtime для HuggingFace моделей (CPU или GPU)
-- Локальный Qdrant
+- Local LLM runtime (CPU or GPU)
+- Local Qdrant
 
-Зависимости:
+Install dependencies:
 
 ```bash
-pip install -r requirements.txt
+pip install -r requirements.rag.txt
+pip install -r requirements.backend.txt
 ```
 
-Примечание: модель(и) для `sentence-transformers` и `transformers` будут скачаны один раз при первом запуске (дальше всё работает локально без внешних API).
+## Run with Docker Compose
 
-
-## Запуск через Docker Compose (3 контейнера)
-
-В `docker-compose.yml` поднимаются:
+Services in `docker-compose.yml`:
 - `qdrant` (vector DB)
-- `rag` (RAG-сервис: retrieval + локальная LLM, порт `8001`)
-- `backend` (фасадный API, порт `8000`, ходит в `rag` по внутренней сети compose)
-
-Запуск:
+- `rag` (retrieval + local LLM, `8001`)
+- `backend` (facade API, `8000`, calls `rag`)
 
 ```bash
 docker compose up --build
 ```
 
-Проверка:
+Health checks:
 
 ```bash
 curl http://localhost:8000/health
 curl http://localhost:8001/health
 ```
 
-### Пример чата через backend
+## 1) Ingest docs (offline)
+
+Default ingestion crawls these seeds:
+- `https://docs.langchain.com/oss/python/langchain/overview`
+- `https://docs.langchain.com/oss/python/langgraph/overview`
+
+Output files:
+- `data/processed/docs_chunks.jsonl` (chunk payloads)
+- `data/processed/ingest_state.json` (resume state)
+
+Quick run:
+
+```bash
+python -m src.prep.ingest_docs --max-pages 200 --resume
+```
+
+Custom crawl boundaries:
+
+```bash
+python -m src.prep.ingest_docs \
+  --start-url "https://docs.langchain.com/oss/python/langchain/overview" \
+  --start-url "https://docs.langchain.com/oss/python/langgraph/overview" \
+  --allowed-prefix "https://docs.langchain.com/oss/python/langchain/" \
+  --allowed-prefix "https://docs.langchain.com/oss/python/langgraph/" \
+  --resume
+```
+
+## 2) Index chunks into Qdrant
+
+```bash
+python -m src.backend.scripts.index_qdrant --recreate-collection
+```
+
+## 3) Run REST API
+
+```bash
+uvicorn src.backend.api.facade.main:app --host 0.0.0.0 --port 8000
+```
+
+Chat request example:
 
 ```bash
 curl -X POST http://localhost:8000/chat \
   -H "Content-Type: application/json" \
-  -d '{"session_id":"demo","message":"Как создать новый курс в Moodle?","language":"auto"}'
+  -d '{"session_id":"demo","message":"What is LangChain?","language":"auto"}'
 ```
 
-### Запуск ingestion через API (для Bruno/curl)
+Admin ingestion via API:
 
 ```bash
 curl -X POST http://localhost:8000/admin/ingest \
@@ -53,87 +88,17 @@ curl -X POST http://localhost:8000/admin/ingest \
   -d '{"max_pages":50,"resume":true,"recreate_collection":true}'
 ```
 
-## 1) Выгрузка и подготовка документации (offline ingestion)
-
-Скрипт использует MediaWiki API (а не HTML-скрейпинг), чтобы снизить шанс капчи.
-
-Файлы:
-- `data/cache/wiki_pages/` (сырой кэш ответов API)
-- `data/processed/moodle_chunks.jsonl` (чанки для индексации)
-
-Быстрый запуск (ограничение страниц):
-
-```bash
-python -m src.prep.ingest_moodle_docs --max-pages 200 --resume
-```
-
-Полный запуск (без `--max-pages`), с возобновлением:
-
-```bash
-python -m src.prep.ingest_moodle_docs --resume
-```
-
-### Если вместо API приходит CAPTCHA
-
-Если MediaWiki API внезапно возвращает human verification/CAPTCHA, скрипт упадёт с понятной ошибкой (чтобы не пытаться “долбить” бесконечно ретраями).
-
-Вариант обхода по требованиям задания:
-1. Один раз решите CAPTCHA в браузере (возможна ручная выгрузка нужных страниц).
-2. Скопируйте выгруженные страницы в локальную директорию.
-3. Запустите ingestion в режиме `--from-local-dir`.
-
-Ожидаемый формат файлов в `--from-local-dir`:
-
-- директория содержит `*.json` файлы
-- каждый файл — JSON-объект вида:
-  - `{"title": "...", "wikitext": "...", "html": "...", "url": "optional"}`  
-  (минимум `title` + любой из `wikitext/html`)
-
-Команда:
-
-```bash
-python -m src.prep.ingest_moodle_docs --from-local-dir /path/to/local_pages --resume
-```
-
-## 2) Индексация чанков в Qdrant
-
-```bash
-python -m src.backend.scripts.index_qdrant --recreate-collection
-```
-
-Если коллекцию пересоздавать не нужно — уберите `--recreate-collection`.
-
-## 3) Запуск REST API
-
-```bash
-uvicorn src.backend.api.facade.main:app --host 0.0.0.0 --port 8000
-```
-
-Health:
-
-```bash
-curl http://localhost:8000/health
-```
-
-Чат:
-
-```bash
-curl -X POST http://localhost:8000/chat \
-  -H "Content-Type: application/json" \
-  -d '{"session_id": "demo", "message": "Как создать новый курс в Moodle?", "language":"auto"}'
-```
-
-## Быстрая проверка запросов (локально, без REST)
+## Quick local eval
 
 ```bash
 python -m src.eval.run_eval
 ```
 
-## Структура проекта
+## Project structure
 
-- `src/prep/`: выгрузка Moodle docs, чистка текста, chunking
-- `src/backend/infrastructure/`: интеграции и внешние хранилища (Qdrant)
-- `src/backend/scripts/`: backend-скрипты (индексация)
+- `src/prep/`: docs ingestion and chunking
+- `src/backend/infrastructure/`: integrations and storage (Qdrant)
+- `src/backend/scripts/`: indexing scripts
 - `src/rag/`: embeddings, retriever, generator
-- `src/backend/api/`: API-контракты и entrypoints (`facade` и `rag`)
-- `src/eval/`: прогон тестовых запросов
+- `src/backend/api/`: API contracts and entrypoints (`facade` and `rag`)
+- `src/eval/`: sample query evaluation

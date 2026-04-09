@@ -11,16 +11,13 @@ from src.backend.api.contracts.schemas import (
     IngestResponse,
 )
 
-
-app = FastAPI(title="Backend API (facade) for Moodle RAG Bot")
+app = FastAPI(title="Backend API (facade) for Docs RAG Bot")
 
 RAG_BASE_URL = os.getenv("RAG_BASE_URL", "http://rag:8001").rstrip("/")
-
 
 @app.get("/health")
 def health() -> dict:
     return {"status": "ok", "rag_base_url": RAG_BASE_URL}
-
 
 @app.post("/chat", response_model=ChatResponse)
 def chat(req: ChatRequest) -> ChatResponse:
@@ -45,7 +42,6 @@ def chat(req: ChatRequest) -> ChatResponse:
     data = response.json()
     data["session_id"] = session_id
     return ChatResponse.model_validate(data)
-
 
 @app.post("/admin/ingest", response_model=IngestResponse)
 def admin_ingest(req: IngestRequest) -> IngestResponse:

@@ -4,20 +4,17 @@ from typing import List
 from src.rag.generator import LocalTextGenerator
 from src.rag.retriever import QdrantRetriever
 
-
 DEFAULT_QUESTIONS = [
-    "Как создать новый курс в Moodle?",
-    "Как настроить систему оценок в Moodle?",
-    "Как просмотреть журналы активности пользователей?",
+    "What is LangChain?",
+    "What is LangGraph?",
+    "How do I build an agent with LangGraph?",
 ]
-
 
 def build_argparser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="Run sample evaluation queries against local RAG bot.")
     p.add_argument("--question", action="append", default=[], help="Add a question (can be repeated).")
     p.add_argument("--top-k", type=int, default=None, help="Override Qdrant retriever top-k.")
     return p
-
 
 def main() -> None:
     args = build_argparser().parse_args()
@@ -41,7 +38,6 @@ def main() -> None:
         print("Sources:")
         for s in retrieved.sources():
             print(f"- {s['title']} ({s['url']}) [score={s['score']:.4f}]")
-
 
 if __name__ == "__main__":
     main()

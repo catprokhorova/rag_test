@@ -77,12 +77,12 @@ def index_chunks(*, chunks_jsonl: Path, batch_size: int, recreate_collection: bo
 def build_argparser() -> argparse.ArgumentParser:
     cfg = settings()
     parser = argparse.ArgumentParser(
-        description="Embed Moodle chunks and index them into local Qdrant."
+        description="Embed docs chunks and index them into local Qdrant."
     )
     parser.add_argument(
         "--chunks-jsonl",
         type=Path,
-        default=cfg.data_dir / "processed" / "moodle_chunks.jsonl",
+        default=cfg.data_dir / "processed" / "docs_chunks.jsonl",
     )
     parser.add_argument("--batch-size", type=int, default=cfg.embedding_batch_size)
     parser.add_argument(

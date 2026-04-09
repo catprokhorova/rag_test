@@ -6,7 +6,10 @@ from pathlib import Path
 @dataclass(frozen=True)
 class Settings:
     # Source documentation
-    moodle_docs_root: str = os.getenv("MOODLE_DOCS_ROOT", "https://docs.moodle.org/501")
+    docs_root: str = os.getenv(
+        "DOCS_ROOT",
+        "https://docs.langchain.com/oss/python/langchain/overview",
+    )
 
     # Local storage
     data_dir: Path = Path(os.getenv("DATA_DIR", "data"))
@@ -14,7 +17,7 @@ class Settings:
     # Qdrant
     qdrant_host: str = os.getenv("QDRANT_HOST", "localhost")
     qdrant_port: int = int(os.getenv("QDRANT_PORT", "6333"))
-    qdrant_collection: str = os.getenv("QDRANT_COLLECTION", "moodle_docs")
+    qdrant_collection: str = os.getenv("QDRANT_COLLECTION", "docs_support")
 
     # Embeddings (multilingual)
     embed_model: str = os.getenv(

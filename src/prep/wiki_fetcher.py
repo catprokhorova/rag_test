@@ -11,7 +11,7 @@ from src.config import settings
 
 
 USER_AGENT = (
-    "moodle-rag-bot/0.1 (local RAG; requests via MediaWiki API; "
+    "docs-rag-bot/0.1 (local RAG; requests via MediaWiki API; "
     "contact: none; user-agent for reproducibility)"
 )
 
@@ -24,9 +24,9 @@ class WikiPage:
     html: Optional[str]
 
 
-class MoodleWikiAPI:
+class DocsWikiAPI:
     """
-    Minimal MediaWiki API client for Moodle docs.
+    Minimal MediaWiki API client for documentation pages.
 
     Key idea: use MediaWiki API rather than HTML scraping to avoid many
     anti-bot measures and make ingestion resumable.
@@ -34,7 +34,7 @@ class MoodleWikiAPI:
 
     def __init__(self, root_url: Optional[str] = None, cache_dir: Optional[Path] = None):
         cfg = settings()
-        self.root_url = (root_url or cfg.moodle_docs_root).rstrip("/")
+        self.root_url = (root_url or cfg.docs_root).rstrip("/")
         self.api_url = f"{self.root_url}/api.php"
         self.session = requests.Session()
         self.session.headers.update({"User-Agent": USER_AGENT})
@@ -55,14 +55,14 @@ class MoodleWikiAPI:
     )
     def _get_json(self, params: Dict) -> Dict:
         resp = self.session.get(self.api_url, params=params, timeout=60)
-        # If Moodle returns a human verification page, we get non-JSON content.
+        # If the upstream returns a human verification page, we get non-JSON content.
         ctype = resp.headers.get("content-type", "")
         if "text/html" in ctype.lower():
             lowered = (resp.text or "").lower()
             if "captcha" in lowered or "verify" in lowered or "human" in lowered:
                 raise RuntimeError(
                     "CAPTCHA/human verification detected while calling MediaWiki API. "
-                    "Use `--from-local-dir` to ingest already downloaded pages "
+                    "Use offline ingestion with locally downloaded pages "
                     "or retry later with a browser-obtained session/cookies."
                 )
         resp.raise_for_status()
@@ -93,7 +93,7 @@ class MoodleWikiAPI:
                     lt = link.get("title")
                     if not lt or lt in seen:
                         continue
-                    # Moodle docs titles often include namespaces (e.g. Category:, Help:).
+                    # MediaWiki titles often include namespaces (e.g. Category:, Help:).
                     # Keep only main-namespace-ish pages to reduce noise.
                     if ":" in lt:
                         continue

@@ -28,7 +28,20 @@ class ChatResponse(BaseModel):
 
 
 class IngestRequest(BaseModel):
-    toc_title: str = Field("Table_of_Contents", description="Moodle docs TOC page title.")
+    start_urls: List[str] = Field(
+        default_factory=lambda: [
+            "https://docs.langchain.com/oss/python/langchain/overview",
+            "https://docs.langchain.com/oss/python/langgraph/overview",
+        ],
+        description="Seed docs URLs to crawl.",
+    )
+    allowed_prefixes: List[str] = Field(
+        default_factory=lambda: [
+            "https://docs.langchain.com/oss/python/langchain/",
+            "https://docs.langchain.com/oss/python/langgraph/",
+        ],
+        description="Allowed URL prefixes for in-domain crawl.",
+    )
     max_pages: Optional[int] = Field(
         None, description="Limit pages for quick ingestion tests."
     )

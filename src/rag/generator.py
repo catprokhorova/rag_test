@@ -4,11 +4,9 @@ from typing import List, Optional, Tuple
 from src.config import settings
 from src.utils import detect_language
 
-
 @dataclass(frozen=True)
 class GenerationResult:
     text: str
-
 
 class LocalTextGenerator:
     """
@@ -51,7 +49,7 @@ class LocalTextGenerator:
     ) -> str:
         if language == "ru":
             system = (
-                "Ты помощник по Moodle. Отвечай на русском. "
+                "Ты помощник по документации LangChain и LangGraph. Отвечай на русском. "
                 "Используй только предоставленный контекст документации. "
                 "Если в контексте нет ответа, скажи, что сведений недостаточно."
             )
@@ -69,7 +67,7 @@ class LocalTextGenerator:
             )
 
         system = (
-            "You are a Moodle support assistant. Answer in English. "
+            "You are a LangChain and LangGraph documentation assistant. Answer in English. "
             "Use only the provided documentation context. "
             "If the answer is not present in the context, say that the information is not available."
         )
