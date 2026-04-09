@@ -1,5 +1,6 @@
 import argparse
 import json
+import logging
 import re
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Sequence, Set
@@ -11,6 +12,8 @@ from tqdm import tqdm
 
 from src.config import settings
 from src.prep.chunking import chunk_text, make_chunk_id
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_START_URLS = (
     "https://docs.langchain.com/oss/python/langchain/overview",
@@ -112,21 +115,25 @@ def _iter_docs_pages(
         if url in seen:
             continue
         seen.add(url)
+        logger.info("Fetching docs page: %s", url)
 
         try:
             resp = session.get(url, timeout=timeout_s)
             resp.raise_for_status()
-        except Exception:
+        except Exception as exc:
+            logger.warning("Failed to fetch page: %s (%s)", url, exc)
             continue
 
         ctype = resp.headers.get("Content-Type", "")
         if "text/html" not in ctype:
+            logger.info("Skipping non-HTML page: %s (content-type=%s)", url, ctype)
             continue
 
         html = resp.text
         soup = BeautifulSoup(html, "lxml")
         title = _title_from_url(url, soup)
         text = _clean_html_to_text(html)
+        logger.info("Fetched docs page: %s (title=%s, chars=%d)", url, title, len(text))
         yield {"title": title, "url": url, "text": text}
 
         for link in _extract_internal_links(base_url=url, soup=soup, allowed_prefixes=allowed_prefixes):
@@ -145,6 +152,12 @@ def ingest(
 ):
     cfg = settings()
     output_jsonl.parent.mkdir(parents=True, exist_ok=True)
+    logger.info(
+        "Starting ingest (max_pages=%s, resume=%s, output=%s)",
+        max_pages,
+        resume,
+        output_jsonl,
+    )
 
     state_path = output_jsonl.parent / "ingest_state.json"
     state: Dict[str, bool] = _load_state(state_path) if resume else {}
@@ -170,9 +183,11 @@ def ingest(
     for page in tqdm(pages, desc="fetch+chunk docs"):
         page_url = page["url"]
         if resume and state.get(page_url):
+            logger.info("Skipping already ingested page (resume): %s", page_url)
             continue
         cleaned = page["text"]
         if not cleaned:
+            logger.info("Skipping empty page text: %s", page_url)
             state[page_url] = True
             _save_state(state_path, state)
             continue
@@ -181,12 +196,14 @@ def ingest(
             max_chars=cfg.chunk_max_chars,
             overlap_chars=cfg.chunk_overlap_chars,
         )
+        logger.info("Chunked page: %s -> %d chunks", page_url, len(chunks))
         for i, c in enumerate(chunks):
             write_chunk(page["title"], page_url, c, i)
         state[page_url] = True
         _save_state(state_path, state)
 
     out_f.close()
+    logger.info("Ingest completed. Output written to: %s", output_jsonl)
 
 
 def build_argparser() -> argparse.ArgumentParser:

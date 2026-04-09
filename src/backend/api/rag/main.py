@@ -1,4 +1,6 @@
 from pathlib import Path
+import logging
+import time
 import uuid
 from typing import Dict, List, Optional, Tuple
 
@@ -18,6 +20,7 @@ from src.config import settings
 
 
 app = FastAPI(title="Docs RAG Bot (local, offline)")
+logger = logging.getLogger(__name__)
 
 _sessions: Dict[str, List[Tuple[str, str]]] = {}
 _retriever: Optional[QdrantRetriever] = None
@@ -85,6 +88,13 @@ def admin_ingest(req: IngestRequest) -> IngestResponse:
     global _retriever
     cfg = settings()
     chunks_jsonl = Path(cfg.data_dir) / "processed" / "docs_chunks.jsonl"
+    started_at = time.perf_counter()
+    logger.info(
+        "Admin ingest started (max_pages=%s, resume=%s, recreate_collection=%s)",
+        req.max_pages,
+        req.resume,
+        req.recreate_collection,
+    )
 
     try:
         ingest(
@@ -98,11 +108,22 @@ def admin_ingest(req: IngestRequest) -> IngestResponse:
             chunks_jsonl=chunks_jsonl,
             batch_size=cfg.embedding_batch_size,
             recreate_collection=req.recreate_collection,
+            embedder=_retriever.embedder if _retriever is not None else None,
         )
-        # Ensure the retriever points to freshly indexed data.
-        _retriever = QdrantRetriever()
+        # Avoid reloading the embeddings model after indexing.
+        if _retriever is None:
+            _retriever = QdrantRetriever()
     except Exception as exc:
+        elapsed_ms = int((time.perf_counter() - started_at) * 1000)
+        logger.exception("Admin ingest failed after %dms", elapsed_ms)
         raise HTTPException(status_code=500, detail=f"Ingestion failed: {exc}") from exc
+    elapsed_ms = int((time.perf_counter() - started_at) * 1000)
+    logger.info(
+        "Admin ingest completed (indexed_chunks=%d, chunks_jsonl=%s, elapsed_ms=%d)",
+        indexed_chunks,
+        chunks_jsonl,
+        elapsed_ms,
+    )
 
     return IngestResponse(
         status="ok",

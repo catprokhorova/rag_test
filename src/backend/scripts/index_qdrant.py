@@ -1,7 +1,7 @@
 import argparse
 import json
 from pathlib import Path
-from typing import Dict, Iterable, List
+from typing import Dict, Iterable, List, Optional
 
 from tqdm import tqdm
 
@@ -18,14 +18,20 @@ def iter_chunks_jsonl(path: Path) -> Iterable[Dict]:
             yield json.loads(line)
 
 
-def index_chunks(*, chunks_jsonl: Path, batch_size: int, recreate_collection: bool) -> int:
+def index_chunks(
+    *,
+    chunks_jsonl: Path,
+    batch_size: int,
+    recreate_collection: bool,
+    embedder: Optional["SentenceTransformerEmbedder"] = None,
+) -> int:
     cfg = settings()
     if not chunks_jsonl.exists():
         raise FileNotFoundError(f"Chunks file not found: {chunks_jsonl}")
 
     from src.rag.embeddings import SentenceTransformerEmbedder
 
-    embedder = SentenceTransformerEmbedder(model_name=cfg.embed_model)
+    embedder = embedder or SentenceTransformerEmbedder(model_name=cfg.embed_model)
     store = QdrantStore()
 
     if recreate_collection:
