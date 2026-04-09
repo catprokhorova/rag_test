@@ -3,12 +3,34 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
+def _csv_env(name: str, default: tuple[str, ...]) -> tuple[str, ...]:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    items = tuple(item.strip() for item in raw.split(",") if item.strip())
+    return items or default
+
+
 @dataclass(frozen=True)
 class Settings:
     # Source documentation
     docs_root: str = os.getenv(
         "DOCS_ROOT",
         "https://docs.langchain.com/oss/python/langchain/overview",
+    )
+    docs_start_urls: tuple[str, ...] = _csv_env(
+        "DOCS_START_URLS",
+        (
+            "https://docs.langchain.com/oss/python/langchain/overview",
+            "https://docs.langchain.com/oss/python/langgraph/overview",
+        ),
+    )
+    docs_allowed_prefixes: tuple[str, ...] = _csv_env(
+        "DOCS_ALLOWED_PREFIXES",
+        (
+            "https://docs.langchain.com/oss/python/langchain/",
+            "https://docs.langchain.com/oss/python/langgraph/",
+        ),
     )
 
     # Local storage

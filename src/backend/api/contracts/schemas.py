@@ -2,6 +2,8 @@ from typing import List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
+from src.config import settings
+
 
 class ChatRequest(BaseModel):
     message: str = Field(..., description="User message")
@@ -29,17 +31,11 @@ class ChatResponse(BaseModel):
 
 class IngestRequest(BaseModel):
     start_urls: List[str] = Field(
-        default_factory=lambda: [
-            "https://docs.langchain.com/oss/python/langchain/overview",
-            "https://docs.langchain.com/oss/python/langgraph/overview",
-        ],
+        default_factory=lambda: list(settings().docs_start_urls),
         description="Seed docs URLs to crawl.",
     )
     allowed_prefixes: List[str] = Field(
-        default_factory=lambda: [
-            "https://docs.langchain.com/oss/python/langchain/",
-            "https://docs.langchain.com/oss/python/langgraph/",
-        ],
+        default_factory=lambda: list(settings().docs_allowed_prefixes),
         description="Allowed URL prefixes for in-domain crawl.",
     )
     max_pages: Optional[int] = Field(

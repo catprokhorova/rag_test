@@ -15,15 +15,6 @@ from src.prep.chunking import chunk_text, make_chunk_id
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_START_URLS = (
-    "https://docs.langchain.com/oss/python/langchain/overview",
-    "https://docs.langchain.com/oss/python/langgraph/overview",
-)
-DEFAULT_ALLOWED_PREFIXES = (
-    "https://docs.langchain.com/oss/python/langchain/",
-    "https://docs.langchain.com/oss/python/langgraph/",
-)
-
 
 def _ensure_dir(path: Path) -> None:
     path.mkdir(parents=True, exist_ok=True)
@@ -234,8 +225,9 @@ def build_argparser() -> argparse.ArgumentParser:
 
 def main() -> None:
     args = build_argparser().parse_args()
-    start_urls = args.start_urls or list(DEFAULT_START_URLS)
-    allowed_prefixes = args.allowed_prefixes or list(DEFAULT_ALLOWED_PREFIXES)
+    cfg = settings()
+    start_urls = args.start_urls or list(cfg.docs_start_urls)
+    allowed_prefixes = args.allowed_prefixes or list(cfg.docs_allowed_prefixes)
     ingest(
         start_urls=start_urls,
         allowed_prefixes=allowed_prefixes,
