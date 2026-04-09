@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+import os
 from threading import Lock
 from typing import Dict, Iterable, List, Sequence
 
@@ -24,10 +25,25 @@ class SentenceTransformerEmbedder:
     def __init__(self, *, model_name: str):
         cfg = settings()
         self.model_name = model_name
+        if cfg.hf_home:
+            # Keep model cache in a persistent location in containers.
+            os.environ.setdefault("HF_HOME", cfg.hf_home)
         with _MODEL_CACHE_LOCK:
             model = _MODEL_CACHE.get(model_name)
             if model is None:
-                model = SentenceTransformer(model_name)
+                try:
+                    model = SentenceTransformer(
+                        model_name,
+                        local_files_only=cfg.embed_local_files_only,
+                        token=cfg.hf_token,
+                    )
+                except Exception as exc:
+                    mode = "local-only" if cfg.embed_local_files_only else "online"
+                    raise RuntimeError(
+                        f"Failed to load embedding model '{model_name}' ({mode} mode). "
+                        "Set HF_TOKEN for authenticated Hugging Face access, or pre-download "
+                        "the model into cache and keep EMBED_LOCAL_FILES_ONLY=1."
+                    ) from exc
                 _MODEL_CACHE[model_name] = model
         self.model = model
         self.embedding_dimension = int(self.model.get_sentence_embedding_dimension())

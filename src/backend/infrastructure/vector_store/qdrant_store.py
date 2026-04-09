@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from uuid import NAMESPACE_URL, UUID, uuid5
 from typing import Dict, List, Optional, Sequence
 
 from qdrant_client import QdrantClient
@@ -51,8 +52,40 @@ class QdrantStore:
     ) -> None:
         points = []
         for vec, payload, point_id in zip(vectors, payloads, ids):
-            points.append(qmodels.PointStruct(id=point_id, vector=vec, payload=payload))
+            points.append(
+                qmodels.PointStruct(
+                    id=self._to_qdrant_point_id(point_id),
+                    vector=vec,
+                    payload=payload,
+                )
+            )
         self.client.upsert(collection_name=self.collection_name, points=points)
+
+    @staticmethod
+    def _to_qdrant_point_id(point_id: str) -> str | int:
+        """
+        Convert external chunk IDs to valid Qdrant point IDs.
+
+        Qdrant accepts only unsigned integers or UUID strings.
+        """
+        if isinstance(point_id, int):
+            if point_id < 0:
+                raise ValueError("Qdrant point id must be non-negative")
+            return point_id
+
+        # Keep numeric string IDs as integers.
+        if isinstance(point_id, str) and point_id.isdigit():
+            return int(point_id)
+
+        # Pass through valid UUIDs unchanged.
+        try:
+            UUID(str(point_id))
+            return str(point_id)
+        except (TypeError, ValueError):
+            pass
+
+        # Deterministically map arbitrary strings (e.g. short hashes) to UUID.
+        return str(uuid5(NAMESPACE_URL, str(point_id)))
 
     def search(
         self,

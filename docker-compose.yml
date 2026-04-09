@@ -18,6 +18,12 @@ services:
       - QDRANT_PORT=6333
       - QDRANT_COLLECTION=docs_support
       - DATA_DIR=/data
+      - HF_HOME=/hf
+      - TRANSFORMERS_CACHE=/hf/transformers
+      - HUGGINGFACE_HUB_CACHE=/hf/hub
+      - EMBED_LOCAL_FILES_ONLY=1
+      - TRANSFORMERS_OFFLINE=1
+      - HF_HUB_OFFLINE=1
     env_file:
       - .env
     ports:

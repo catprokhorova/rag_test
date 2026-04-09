@@ -31,8 +31,16 @@ _generator: Optional[LocalTextGenerator] = None
 def _startup() -> None:
     global _retriever, _generator
     _ = settings()
+    # Warm model-dependent services once during startup, so requests only use in-memory instances.
     _retriever = QdrantRetriever()
     _generator = LocalTextGenerator()
+
+
+def _get_retriever() -> QdrantRetriever:
+    if _retriever is None:
+        # Startup initializes retriever; this is a defensive guard.
+        raise RuntimeError("Retriever is not initialized yet.")
+    return _retriever
 
 
 @app.get("/health")
@@ -43,14 +51,18 @@ def health() -> dict:
 @app.post("/chat", response_model=ChatResponse)
 def chat(req: ChatRequest) -> ChatResponse:
     global _retriever, _generator
-    if _retriever is None or _generator is None:
+    if _generator is None:
         raise HTTPException(status_code=503, detail="Server is not ready yet.")
 
     session_id = req.session_id or str(uuid.uuid4())
     history = _sessions.get(session_id, [])
     history = history[-4:]
 
-    retrieved = _retriever.retrieve(req.message)
+    try:
+        retrieved = _get_retriever().retrieve(req.message)
+    except Exception as exc:
+        logger.exception("Retriever initialization/query failed")
+        raise HTTPException(status_code=503, detail=f"Retriever unavailable: {exc}") from exc
     context = retrieved.format_for_prompt()
 
     lang = req.language

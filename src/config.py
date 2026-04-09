@@ -24,6 +24,15 @@ class Settings:
         "EMBED_MODEL", "intfloat/multilingual-e5-small"
     )
     embedding_batch_size: int = int(os.getenv("EMBED_BATCH_SIZE", "32"))
+    # HF access/cache controls for embedding model loading.
+    hf_token: str | None = os.getenv("HF_TOKEN")
+    hf_home: str | None = os.getenv("HF_HOME")
+    embed_local_files_only: bool = os.getenv("EMBED_LOCAL_FILES_ONLY", "1").lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
 
     # LLM generation (must run locally)
     llm_backend: str = os.getenv("LLM_BACKEND", "llama_cpp")
