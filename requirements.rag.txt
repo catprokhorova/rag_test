@@ -3,6 +3,10 @@ uvicorn[standard]
 requests
 tenacity
 tqdm
+langchain
+langchain-core
+langchain-community
+langchain-text-splitters
 qdrant-client
 sentence-transformers
 beautifulsoup4

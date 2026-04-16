@@ -3,10 +3,17 @@ import json
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional
 
+from langchain_core.documents import Document
 from tqdm import tqdm
 
-from src.backend.infrastructure.vector_store.qdrant_store import QdrantStore
+from src.backend.infrastructure.vector_store.qdrant_store import (
+    delete_collection_if_exists,
+    ensure_collection,
+    get_vector_store,
+    to_qdrant_point_id,
+)
 from src.config import settings
+from src.rag.embeddings import get_embeddings
 
 
 def iter_chunks_jsonl(path: Path) -> Iterable[Dict]:
@@ -23,57 +30,48 @@ def index_chunks(
     chunks_jsonl: Path,
     batch_size: int,
     recreate_collection: bool,
-    embedder: Optional["SentenceTransformerEmbedder"] = None,
+    embeddings=None,
 ) -> int:
-    cfg = settings()
     if not chunks_jsonl.exists():
         raise FileNotFoundError(f"Chunks file not found: {chunks_jsonl}")
 
-    from src.rag.embeddings import SentenceTransformerEmbedder
-
-    embedder = embedder or SentenceTransformerEmbedder(model_name=cfg.embed_model)
-    store = QdrantStore()
+    embeddings = embeddings or get_embeddings()
 
     if recreate_collection:
-        store.client.delete_collection(store.collection_name)
+        delete_collection_if_exists()
 
-    store.ensure_collection(vector_size=embedder.embedding_dimension)
+    ensure_collection(vector_size=embeddings.embedding_dimension)
+    store = get_vector_store(embeddings)
 
-    batch_texts: List[str] = []
-    batch_payloads: List[Dict] = []
-    batch_ids: List[str] = []
+    batch_docs: List[Document] = []
+    batch_ids: List[str | int] = []
     indexed = 0
 
     def flush_batch() -> None:
-        nonlocal batch_texts, batch_payloads, batch_ids, indexed
-        if not batch_texts:
+        nonlocal batch_docs, batch_ids, indexed
+        if not batch_docs:
             return
 
-        vectors = embedder.embed_texts(batch_texts)
-        store.upsert_embeddings(
-            vectors=vectors,
-            payloads=batch_payloads,
-            ids=batch_ids,
-        )
-        indexed += len(batch_texts)
-        batch_texts = []
-        batch_payloads = []
+        store.add_documents(documents=batch_docs, ids=[str(point_id) for point_id in batch_ids])
+        indexed += len(batch_docs)
+        batch_docs = []
         batch_ids = []
 
     for chunk in tqdm(iter_chunks_jsonl(chunks_jsonl), desc="index chunks"):
         chunk_id = chunk["chunk_id"]
-        batch_ids.append(chunk_id)
-        batch_texts.append(chunk["text"])
-        batch_payloads.append(
-            {
+        batch_ids.append(to_qdrant_point_id(chunk_id))
+        batch_docs.append(
+            Document(
+                page_content=chunk["text"],
+                metadata={
                 "chunk_id": chunk_id,
                 "page_title": chunk.get("page_title", ""),
                 "url": chunk.get("url", ""),
                 "chunk_index": chunk.get("chunk_index", 0),
-                "text": chunk["text"],
-            }
+                },
+            )
         )
-        if len(batch_texts) >= batch_size:
+        if len(batch_docs) >= batch_size:
             flush_batch()
 
     flush_batch()

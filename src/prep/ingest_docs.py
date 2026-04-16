@@ -6,12 +6,14 @@ from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Sequence, Set
 from urllib.parse import urldefrag, urljoin, urlparse
 
+from langchain_core.documents import Document
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 import requests
 from bs4 import BeautifulSoup
 from tqdm import tqdm
 
 from src.config import settings
-from src.prep.chunking import chunk_text, make_chunk_id
+from src.prep.chunking import make_chunk_id
 
 logger = logging.getLogger(__name__)
 
@@ -142,6 +144,10 @@ def ingest(
     resume: bool,
 ):
     cfg = settings()
+    splitter = RecursiveCharacterTextSplitter(
+        chunk_size=cfg.chunk_max_chars,
+        chunk_overlap=cfg.chunk_overlap_chars,
+    )
     output_jsonl.parent.mkdir(parents=True, exist_ok=True)
     logger.info(
         "Starting ingest (max_pages=%s, resume=%s, output=%s)",
@@ -163,6 +169,7 @@ def ingest(
             "url": page_url,
             "chunk_index": chunk_index,
             "text": chunk_text_value,
+            "source": page_url,
         }
         out_f.write(json.dumps(payload, ensure_ascii=False) + "\n")
 
@@ -182,11 +189,7 @@ def ingest(
             state[page_url] = True
             _save_state(state_path, state)
             continue
-        chunks = chunk_text(
-            cleaned,
-            max_chars=cfg.chunk_max_chars,
-            overlap_chars=cfg.chunk_overlap_chars,
-        )
+        chunks = splitter.split_text(cleaned)
         logger.info("Chunked page: %s -> %d chunks", page_url, len(chunks))
         for i, c in enumerate(chunks):
             write_chunk(page["title"], page_url, c, i)
@@ -195,6 +198,29 @@ def ingest(
 
     out_f.close()
     logger.info("Ingest completed. Output written to: %s", output_jsonl)
+
+
+def load_documents_from_jsonl(path: Path) -> List[Document]:
+    docs: List[Document] = []
+    with path.open("r", encoding="utf-8") as file:
+        for line in file:
+            line = line.strip()
+            if not line:
+                continue
+            chunk = json.loads(line)
+            docs.append(
+                Document(
+                    page_content=chunk["text"],
+                    metadata={
+                        "chunk_id": chunk["chunk_id"],
+                        "page_title": chunk.get("page_title", ""),
+                        "url": chunk.get("url", ""),
+                        "chunk_index": int(chunk.get("chunk_index", 0)),
+                        "source": chunk.get("source") or chunk.get("url", ""),
+                    },
+                )
+            )
+    return docs
 
 
 def build_argparser() -> argparse.ArgumentParser:

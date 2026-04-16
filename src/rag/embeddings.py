@@ -1,64 +1,52 @@
-from dataclasses import dataclass
 import os
-from threading import Lock
-from typing import Dict, Iterable, List, Sequence
+from functools import lru_cache
+from typing import List
 
-from sentence_transformers import SentenceTransformer
-
+from langchain_community.embeddings import HuggingFaceEmbeddings
 from src.config import settings
 
-_MODEL_CACHE: Dict[str, SentenceTransformer] = {}
-_MODEL_CACHE_LOCK = Lock()
 
-
-@dataclass(frozen=True)
-class EmbeddingResult:
-    vectors: List[List[float]]
-    dim: int
-
-
-class SentenceTransformerEmbedder:
+class E5HuggingFaceEmbeddings(HuggingFaceEmbeddings):
     """
-    Local multilingual embeddings via `sentence-transformers`.
+    LangChain embeddings adapter with optional E5 query/passage prefixes.
     """
 
-    def __init__(self, *, model_name: str):
+    def __init__(self, *, model_name: str, use_e5_prefixes: bool = False):
         cfg = settings()
-        self.model_name = model_name
         if cfg.hf_home:
-            # Keep model cache in a persistent location in containers.
             os.environ.setdefault("HF_HOME", cfg.hf_home)
-        with _MODEL_CACHE_LOCK:
-            model = _MODEL_CACHE.get(model_name)
-            if model is None:
-                try:
-                    model = SentenceTransformer(
-                        model_name,
-                        local_files_only=cfg.embed_local_files_only,
-                        token=cfg.hf_token,
-                    )
-                except Exception as exc:
-                    mode = "local-only" if cfg.embed_local_files_only else "online"
-                    raise RuntimeError(
-                        f"Failed to load embedding model '{model_name}' ({mode} mode). "
-                        "Set HF_TOKEN for authenticated Hugging Face access, or pre-download "
-                        "the model into cache and keep EMBED_LOCAL_FILES_ONLY=1."
-                    ) from exc
-                _MODEL_CACHE[model_name] = model
-        self.model = model
-        self.embedding_dimension = int(self.model.get_sentence_embedding_dimension())
-        self.batch_size = cfg.embedding_batch_size
-
-    def embed_texts(self, texts: Sequence[str]) -> List[List[float]]:
-        vectors = self.model.encode(
-            list(texts),
-            batch_size=self.batch_size,
-            show_progress_bar=False,
-            normalize_embeddings=True,
+        self.use_e5_prefixes = use_e5_prefixes
+        super().__init__(
+            model_name=model_name,
+            model_kwargs={
+                "local_files_only": cfg.embed_local_files_only,
+                "token": cfg.hf_token,
+            },
+            encode_kwargs={
+                "batch_size": cfg.embedding_batch_size,
+                "normalize_embeddings": True,
+            },
         )
-        # Convert numpy arrays -> python lists for Qdrant client.
-        return [v.tolist() for v in vectors]
+        self.embedding_dimension = int(self.client.get_sentence_embedding_dimension())
 
-    def embed_query(self, query: str) -> List[float]:
-        return self.embed_texts([query])[0]
+    def _prefix_passages(self, texts: List[str]) -> List[str]:
+        if not self.use_e5_prefixes:
+            return texts
+        return [f"passage: {text}" for text in texts]
+
+    def embed_documents(self, texts: List[str]) -> List[List[float]]:
+        return super().embed_documents(self._prefix_passages(texts))
+
+    def embed_query(self, text: str) -> List[float]:
+        query = f"query: {text}" if self.use_e5_prefixes else text
+        return super().embed_query(query)
+
+
+@lru_cache(maxsize=1)
+def get_embeddings() -> E5HuggingFaceEmbeddings:
+    cfg = settings()
+    return E5HuggingFaceEmbeddings(
+        model_name=cfg.embed_model,
+        use_e5_prefixes=cfg.embed_use_e5_prefixes,
+    )
 

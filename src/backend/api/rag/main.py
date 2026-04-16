@@ -14,7 +14,7 @@ from src.backend.api.contracts.schemas import (
 )
 from src.backend.scripts.index_qdrant import index_chunks
 from src.prep.ingest_docs import ingest
-from src.rag.generator import LocalTextGenerator
+from src.rag.generator import generate_answer
 from src.rag.retriever import QdrantRetriever
 from src.config import settings
 
@@ -24,16 +24,28 @@ logger = logging.getLogger(__name__)
 
 _sessions: Dict[str, List[Tuple[str, str]]] = {}
 _retriever: Optional[QdrantRetriever] = None
-_generator: Optional[LocalTextGenerator] = None
+
+
+def _run_rag(question: str, history: List[Tuple[str, str]], language: Optional[str]):
+    retrieved = _get_retriever().retrieve(question)
+    context = retrieved.format_for_prompt()
+    if language == "auto":
+        language = None
+    result = generate_answer(
+        question=question,
+        context=context,
+        history=history,
+        language=language,
+    )
+    return result, retrieved
 
 
 @app.on_event("startup")
 def _startup() -> None:
-    global _retriever, _generator
+    global _retriever
     _ = settings()
     # Warm model-dependent services once during startup, so requests only use in-memory instances.
     _retriever = QdrantRetriever()
-    _generator = LocalTextGenerator()
 
 
 def _get_retriever() -> QdrantRetriever:
@@ -50,31 +62,16 @@ def health() -> dict:
 
 @app.post("/chat", response_model=ChatResponse)
 def chat(req: ChatRequest) -> ChatResponse:
-    global _retriever, _generator
-    if _generator is None:
-        raise HTTPException(status_code=503, detail="Server is not ready yet.")
-
+    global _retriever
     session_id = req.session_id or str(uuid.uuid4())
     history = _sessions.get(session_id, [])
     history = history[-4:]
 
     try:
-        retrieved = _get_retriever().retrieve(req.message)
+        result, retrieved = _run_rag(req.message, history, req.language)
     except Exception as exc:
         logger.exception("Retriever initialization/query failed")
         raise HTTPException(status_code=503, detail=f"Retriever unavailable: {exc}") from exc
-    context = retrieved.format_for_prompt()
-
-    lang = req.language
-    if lang == "auto":
-        lang = None
-
-    result = _generator.generate(
-        question=req.message,
-        context=context,
-        history=history,
-        language=lang,
-    )
 
     answer = result.text.strip()
     _sessions[session_id] = history + [(req.message, answer)]
@@ -120,11 +117,8 @@ def admin_ingest(req: IngestRequest) -> IngestResponse:
             chunks_jsonl=chunks_jsonl,
             batch_size=cfg.embedding_batch_size,
             recreate_collection=req.recreate_collection,
-            embedder=_retriever.embedder if _retriever is not None else None,
         )
-        # Avoid reloading the embeddings model after indexing.
-        if _retriever is None:
-            _retriever = QdrantRetriever()
+        _retriever = QdrantRetriever()
     except Exception as exc:
         elapsed_ms = int((time.perf_counter() - started_at) * 1000)
         logger.exception("Admin ingest failed after %dms", elapsed_ms)
