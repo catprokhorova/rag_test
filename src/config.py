@@ -46,12 +46,6 @@ class Settings:
         "EMBED_MODEL", "intfloat/multilingual-e5-small"
     )
     embedding_batch_size: int = int(os.getenv("EMBED_BATCH_SIZE", "32"))
-    embed_use_e5_prefixes: bool = os.getenv("EMBED_USE_E5_PREFIXES", "0").lower() in {
-        "1",
-        "true",
-        "yes",
-        "on",
-    }
     # HF access/cache controls for embedding model loading.
     hf_token: str | None = os.getenv("HF_TOKEN")
     hf_home: str | None = os.getenv("HF_HOME")

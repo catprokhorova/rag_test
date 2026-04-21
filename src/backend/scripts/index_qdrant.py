@@ -40,7 +40,7 @@ def index_chunks(
     if recreate_collection:
         delete_collection_if_exists()
 
-    ensure_collection(vector_size=embeddings.embedding_dimension)
+    ensure_collection(vector_size=512)
     store = get_vector_store(embeddings)
 
     batch_docs: List[Document] = []
