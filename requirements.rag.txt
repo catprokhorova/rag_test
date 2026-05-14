@@ -13,4 +13,3 @@ beautifulsoup4
 lxml
 mwparserfromhell
 httpx
-llama-cpp-python

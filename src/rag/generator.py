@@ -1,9 +1,8 @@
 from dataclasses import dataclass
-from typing import List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
-from langchain_community.llms import LlamaCpp
+import httpx
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.runnables import Runnable
 
 from src.config import settings
 from src.utils import detect_language
@@ -57,37 +56,52 @@ def _format_history(history: List[Tuple[str, str]]) -> str:
     return "\n".join([f"User: {u}\nAssistant: {a}" for (u, a) in history[-4:]])
 
 
-def build_llama_cpp() -> LlamaCpp:
-    cfg = settings()
-    if cfg.llm_backend != "llama_cpp":
-        raise RuntimeError(
-            "Only llama_cpp backend is supported for the LangChain LlamaCpp adapter."
-        )
-    if not cfg.llm_gguf_path:
-        raise RuntimeError("LLM_GGUF_PATH must be set for llama_cpp backend.")
-
-    return LlamaCpp(
-        model_path=cfg.llm_gguf_path,
-        n_ctx=cfg.llm_ctx,
-        n_threads=cfg.llm_threads,
-        n_gpu_layers=0,
-        temperature=cfg.llm_temperature,
-        repeat_penalty=cfg.llm_repetition_penalty,
-        max_tokens=cfg.llm_max_new_tokens,
-        verbose=False,
-    )
+def _message_to_openai_role(msg: Any) -> str:
+    t = getattr(msg, "type", None) or msg.__class__.__name__.lower()
+    if t == "system":
+        return "system"
+    if t in ("human", "user"):
+        return "user"
+    if t in ("ai", "assistant"):
+        return "assistant"
+    return "user"
 
 
-def build_chat_chain(*, language: str) -> Runnable:
-    """
-    Build a prompt → LlamaCpp chain.
+def _chat_completions(
+    *,
+    url: str,
+    model: str,
+    messages: List[Dict[str, str]],
+    max_tokens: int,
+    temperature: float,
+    api_key: Optional[str],
+    timeout_s: float,
+) -> str:
+    headers: Dict[str, str] = {"Content-Type": "application/json"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
 
-    Retrieval is performed separately so we can keep the existing
-    RetrievedContext formatting and source handling.
-    """
-    prompt = _build_prompt_template(language=language)
-    llm = build_llama_cpp()
-    return prompt | llm
+    body: Dict[str, Any] = {
+        "messages": messages,
+        "max_tokens": max_tokens,
+        "temperature": temperature,
+        "stream": False,
+    }
+    body["model"] = model
+
+    with httpx.Client(timeout=timeout_s) as client:
+        r = client.post(url, json=body, headers=headers)
+        r.raise_for_status()
+        data = r.json()
+
+    choices = data.get("choices") or []
+    if not choices:
+        raise RuntimeError("LLM response missing choices")
+    msg = choices[0].get("message") or {}
+    content = msg.get("content")
+    if content is None:
+        raise RuntimeError("LLM response missing message content")
+    return str(content).strip()
 
 
 def generate_answer(
@@ -98,24 +112,33 @@ def generate_answer(
     language: Optional[str] = None,
 ) -> GenerationResult:
     """
-    High-level helper that mirrors LocalTextGenerator.generate API
-    but uses a LangChain LlamaCpp chain under the hood.
+    Call an OpenAI-compatible chat completions endpoint (e.g. LM Studio) to produce an answer.
     """
     cfg = settings()
     lang = language or detect_language(question)
-    chain = build_chat_chain(language=lang)
+    prompt = _build_prompt_template(language=lang)
 
     history_str = _format_history(history)
-    # Keep rough parity with previous character-based truncation on context size.
     if cfg.llm_max_input_tokens and len(context) > cfg.llm_max_input_tokens * 4:
         context = context[-cfg.llm_max_input_tokens * 4 :]
 
-    result = chain.invoke(
-        {
-            "question": question,
-            "context": context,
-            "history": history_str,
-        }
+    lc_messages = prompt.format_messages(
+        question=question,
+        context=context,
+        history=history_str,
     )
-    text = str(result).strip()
+    messages = [
+        {"role": _message_to_openai_role(m), "content": m.content}
+        for m in lc_messages
+    ]
+
+    text = _chat_completions(
+        url=cfg.llm_chat_completions_url,
+        model=cfg.llm_model,
+        messages=messages,
+        max_tokens=cfg.llm_max_new_tokens,
+        temperature=cfg.llm_temperature,
+        api_key=cfg.llm_api_key,
+        timeout_s=cfg.llm_request_timeout_s,
+    )
     return GenerationResult(text=text)

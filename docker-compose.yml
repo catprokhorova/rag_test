@@ -30,7 +30,6 @@ services:
       - "8001:8001"
     volumes:
       - ./hf_cache:/hf
-      - ./models:/models
       - ./data_dir:/data
 
   backend:
