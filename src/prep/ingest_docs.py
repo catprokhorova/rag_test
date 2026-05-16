@@ -1,13 +1,15 @@
+"""Parse local LangChain PDFs and write chunked JSONL for Qdrant indexing."""
+
+from __future__ import annotations
+
 import argparse
 import json
 import logging
-import re
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Sequence, Set
-from urllib.parse import urldefrag, urljoin, urlparse
+from typing import List, Set
 
-import requests
-from bs4 import BeautifulSoup
+from langchain_community.document_loaders.pdf import PagedPDFSplitter
 from tqdm import tqdm
 
 from src.config import settings
@@ -16,224 +18,180 @@ from src.prep.chunking import chunk_text, make_chunk_id
 logger = logging.getLogger(__name__)
 
 
-def _ensure_dir(path: Path) -> None:
-    path.mkdir(parents=True, exist_ok=True)
+@dataclass(frozen=True)
+class IngestOutcome:
+    pdfs_processed: int
+    chunks_appended: int
+
+    @property
+    def pages_fetched(self) -> int:
+        """Alias kept for admin ingest API compatibility."""
+        return self.pdfs_processed
 
 
-def _load_state(state_path: Path) -> Dict[str, bool]:
+def _state_path(output_jsonl: Path) -> Path:
+    return output_jsonl.parent / "ingest_state.json"
+
+
+def _load_processed_pdfs(state_path: Path) -> Set[str]:
     if not state_path.exists():
-        return {}
-    return json.loads(state_path.read_text(encoding="utf-8"))
+        return set()
+    data = json.loads(state_path.read_text(encoding="utf-8"))
+    return set(data.get("processed_pdfs", []))
 
 
-def _save_state(state_path: Path, state: Dict[str, bool]) -> None:
-    _ensure_dir(state_path.parent)
-    state_path.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
-
-
-def _normalize_url(url: str) -> str:
-    clean, _ = urldefrag(url.strip())
-    return clean.rstrip("/")
-
-
-def _is_allowed_url(url: str, allowed_prefixes: Sequence[str]) -> bool:
-    return any(url.startswith(prefix.rstrip("/")) for prefix in allowed_prefixes)
-
-
-def _title_from_url(url: str, soup: BeautifulSoup) -> str:
-    if soup.title and soup.title.string:
-        return soup.title.string.strip()
-    return urlparse(url).path.strip("/") or url
-
-
-def _clean_html_to_text(html: str) -> str:
-    soup = BeautifulSoup(html, "lxml")
-    for tag in soup(["script", "style", "noscript", "svg"]):
-        tag.decompose()
-
-    main = soup.find("main") or soup.body or soup
-    text = main.get_text("\n")
-    text = text.replace("\xa0", " ")
-    text = re.sub(r"[ \t]+", " ", text)
-    text = re.sub(r"\n{3,}", "\n\n", text)
-    return text.strip()
-
-
-def _extract_internal_links(
-    *,
-    base_url: str,
-    soup: BeautifulSoup,
-    allowed_prefixes: Sequence[str],
-) -> List[str]:
-    links: List[str] = []
-    for a in soup.find_all("a", href=True):
-        href = a["href"].strip()
-        if not href:
-            continue
-        full = _normalize_url(urljoin(base_url, href))
-        parsed = urlparse(full)
-        if parsed.scheme not in ("http", "https"):
-            continue
-        if not _is_allowed_url(full, allowed_prefixes):
-            continue
-        links.append(full)
-    return links
-
-
-def _iter_docs_pages(
-    *,
-    start_urls: Sequence[str],
-    allowed_prefixes: Sequence[str],
-    max_pages: Optional[int],
-    timeout_s: int = 20,
-) -> Iterable[Dict[str, str]]:
-    session = requests.Session()
-    session.headers.update(
-        {
-            "User-Agent": "rag-test-ingester/1.0 (+local)",
-            "Accept": "text/html,application/xhtml+xml",
-        }
+def _save_processed_pdfs(state_path: Path, processed: Set[str]) -> None:
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    state_path.write_text(
+        json.dumps({"processed_pdfs": sorted(processed)}, indent=2),
+        encoding="utf-8",
     )
 
-    queue: List[str] = [_normalize_url(url) for url in start_urls]
-    queued: Set[str] = set(queue)
-    seen: Set[str] = set()
 
-    while queue:
-        if max_pages is not None and len(seen) >= max_pages:
-            break
-        url = queue.pop(0)
-        if url in seen:
-            continue
-        seen.add(url)
-        logger.info("Fetching docs page: %s", url)
+def _iter_pdf_paths(pdf_dir: Path) -> List[Path]:
+    return sorted(pdf_dir.glob("*.pdf"))
 
-        try:
-            resp = session.get(url, timeout=timeout_s)
-            resp.raise_for_status()
-        except Exception as exc:
-            logger.warning("Failed to fetch page: %s (%s)", url, exc)
-            continue
 
-        ctype = resp.headers.get("Content-Type", "")
-        if "text/html" not in ctype:
-            logger.info("Skipping non-HTML page: %s (content-type=%s)", url, ctype)
-            continue
+def _pdf_source_url(pdf_path: Path) -> str:
+    return pdf_path.resolve().as_uri()
 
-        html = resp.text
-        soup = BeautifulSoup(html, "lxml")
-        title = _title_from_url(url, soup)
-        text = _clean_html_to_text(html)
-        logger.info("Fetched docs page: %s (title=%s, chars=%d)", url, title, len(text))
-        yield {"title": title, "url": url, "text": text}
 
-        for link in _extract_internal_links(base_url=url, soup=soup, allowed_prefixes=allowed_prefixes):
-            if link not in queued and link not in seen:
-                queue.append(link)
-                queued.add(link)
+def _chunk_records_for_pdf(
+    pdf_path: Path,
+    *,
+    max_chars: int,
+    overlap_chars: int,
+) -> List[dict]:
+    loader = PagedPDFSplitter(str(pdf_path))
+    page_docs = loader.load()
+    page_title = pdf_path.stem
+    source_url = _pdf_source_url(pdf_path)
+    records: List[dict] = []
+
+    for page_doc in page_docs:
+        page_num = int(page_doc.metadata.get("page", 0))
+        page_chunks = chunk_text(
+            page_doc.page_content,
+            max_chars=max_chars,
+            overlap_chars=overlap_chars,
+        )
+        for chunk_index, text in enumerate(page_chunks):
+            if not text.strip():
+                continue
+            records.append(
+                {
+                    "chunk_id": make_chunk_id(
+                        f"{pdf_path.name}#p{page_num}", chunk_index
+                    ),
+                    "text": text,
+                    "page_title": page_title,
+                    "url": source_url,
+                    "chunk_index": chunk_index,
+                    "source_file": pdf_path.name,
+                    "page": page_num,
+                }
+            )
+    return records
 
 
 def ingest(
     *,
-    start_urls: Sequence[str],
-    allowed_prefixes: Sequence[str],
-    max_pages: Optional[int],
-    output_jsonl: Path,
-    resume: bool,
-):
+    pdf_dir: Path | None = None,
+    max_pdfs: int | None = None,
+    output_jsonl: Path | None = None,
+    resume: bool = False,
+) -> IngestOutcome:
     cfg = settings()
+    pdf_dir = pdf_dir or cfg.pdf_dir
+    output_jsonl = output_jsonl or (cfg.data_dir / "processed" / "docs_chunks.jsonl")
+
+    if not pdf_dir.is_dir():
+        raise FileNotFoundError(f"PDF directory not found: {pdf_dir}")
+
+    pdf_paths = _iter_pdf_paths(pdf_dir)
+    if max_pdfs is not None:
+        pdf_paths = pdf_paths[:max_pdfs]
+
     output_jsonl.parent.mkdir(parents=True, exist_ok=True)
-    logger.info(
-        "Starting ingest (max_pages=%s, resume=%s, output=%s)",
-        max_pages,
-        resume,
-        output_jsonl,
-    )
+    state_path = _state_path(output_jsonl)
 
-    state_path = output_jsonl.parent / "ingest_state.json"
-    state: Dict[str, bool] = _load_state(state_path) if resume else {}
+    if not resume:
+        output_jsonl.write_text("", encoding="utf-8")
+        processed: Set[str] = set()
+    else:
+        processed = _load_processed_pdfs(state_path)
 
-    out_f = output_jsonl.open("a" if resume else "w", encoding="utf-8")
+    chunks_appended = 0
+    pdfs_processed = 0
 
-    def write_chunk(page_title: str, page_url: str, chunk_text_value: str, chunk_index: int) -> None:
-        chunk_id = make_chunk_id(page_url, chunk_index)
-        payload = {
-            "chunk_id": chunk_id,
-            "page_title": page_title,
-            "url": page_url,
-            "chunk_index": chunk_index,
-            "text": chunk_text_value,
-        }
-        out_f.write(json.dumps(payload, ensure_ascii=False) + "\n")
+    with output_jsonl.open("a", encoding="utf-8") as out:
+        for pdf_path in tqdm(pdf_paths, desc="ingest pdfs"):
+            if pdf_path.name in processed:
+                continue
+            try:
+                records = _chunk_records_for_pdf(
+                    pdf_path,
+                    max_chars=cfg.chunk_max_chars,
+                    overlap_chars=cfg.chunk_overlap_chars,
+                )
+            except Exception:
+                logger.exception("Failed to parse PDF: %s", pdf_path)
+                raise
 
-    pages = _iter_docs_pages(
-        start_urls=start_urls,
-        allowed_prefixes=allowed_prefixes,
-        max_pages=max_pages,
-    )
-    for page in tqdm(pages, desc="fetch+chunk docs"):
-        page_url = page["url"]
-        if resume and state.get(page_url):
-            logger.info("Skipping already ingested page (resume): %s", page_url)
-            continue
-        cleaned = page["text"]
-        if not cleaned:
-            logger.info("Skipping empty page text: %s", page_url)
-            state[page_url] = True
-            _save_state(state_path, state)
-            continue
-        chunks = chunk_text(
-            cleaned,
-            max_chars=cfg.chunk_max_chars,
-            overlap_chars=cfg.chunk_overlap_chars,
-        )
-        logger.info("Chunked page: %s -> %d chunks", page_url, len(chunks))
-        for i, c in enumerate(chunks):
-            write_chunk(page["title"], page_url, c, i)
-        state[page_url] = True
-        _save_state(state_path, state)
+            for record in records:
+                out.write(json.dumps(record, ensure_ascii=False) + "\n")
+            chunks_appended += len(records)
+            processed.add(pdf_path.name)
+            pdfs_processed += 1
+            _save_processed_pdfs(state_path, processed)
 
-    out_f.close()
-    logger.info("Ingest completed. Output written to: %s", output_jsonl)
+    return IngestOutcome(pdfs_processed=pdfs_processed, chunks_appended=chunks_appended)
 
 
 def build_argparser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(description="Ingestion for LangChain/LangGraph docs (HTML fetch + chunking).")
-    p.add_argument(
-        "--start-url",
-        action="append",
-        dest="start_urls",
-        default=None,
-        help="Seed URL to crawl. Can be specified multiple times.",
+    cfg = settings()
+    parser = argparse.ArgumentParser(
+        description="Parse local LangChain PDFs into docs_chunks.jsonl."
     )
-    p.add_argument(
-        "--allowed-prefix",
-        action="append",
-        dest="allowed_prefixes",
-        default=None,
-        help="Allowed URL prefix for crawling. Can be specified multiple times.",
+    parser.add_argument(
+        "--pdf-dir",
+        type=Path,
+        default=cfg.pdf_dir,
+        help="Directory containing downloaded PDF files.",
     )
-    p.add_argument("--max-pages", type=int, default=None, help="Limit pages for quick runs.")
-    p.add_argument(
+    parser.add_argument(
         "--output-jsonl",
         type=Path,
-        default=settings().data_dir / "processed" / "docs_chunks.jsonl",
+        default=cfg.data_dir / "processed" / "docs_chunks.jsonl",
     )
-    p.add_argument("--resume", action="store_true", help="Resume using ingest_state.json.")
-    return p
+    parser.add_argument(
+        "--max-pdfs",
+        type=int,
+        default=None,
+        help="Limit number of PDFs (for quick tests).",
+    )
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="Skip PDFs already recorded in ingest_state.json.",
+    )
+    return parser
 
 
 def main() -> None:
+    logging.basicConfig(level=logging.INFO)
     args = build_argparser().parse_args()
-    cfg = settings()
-    start_urls = args.start_urls or list(cfg.docs_start_urls)
-    allowed_prefixes = args.allowed_prefixes or list(cfg.docs_allowed_prefixes)
-    ingest(
-        start_urls=start_urls,
-        allowed_prefixes=allowed_prefixes,
-        max_pages=args.max_pages,
+    outcome = ingest(
+        pdf_dir=args.pdf_dir,
+        max_pdfs=args.max_pdfs,
         output_jsonl=args.output_jsonl,
         resume=args.resume,
+    )
+    logger.info(
+        "Ingest complete (pdfs_processed=%d, chunks_appended=%d, output=%s)",
+        outcome.pdfs_processed,
+        outcome.chunks_appended,
+        args.output_jsonl,
     )
 
 

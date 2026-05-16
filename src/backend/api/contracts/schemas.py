@@ -30,19 +30,16 @@ class ChatResponse(BaseModel):
 
 
 class IngestRequest(BaseModel):
-    start_urls: List[str] = Field(
-        default_factory=lambda: list(settings().docs_start_urls),
-        description="Seed docs URLs to crawl.",
+    pdf_dir: Optional[str] = Field(
+        None,
+        description="Directory with LangChain PDF files (defaults to PDF_DIR).",
     )
-    allowed_prefixes: List[str] = Field(
-        default_factory=lambda: list(settings().docs_allowed_prefixes),
-        description="Allowed URL prefixes for in-domain crawl.",
-    )
-    max_pages: Optional[int] = Field(
-        None, description="Limit pages for quick ingestion tests."
+    max_pdfs: Optional[int] = Field(
+        None, description="Limit PDF files for quick ingestion tests."
     )
     resume: bool = Field(
-        True, description="Resume using ingest_state.json and append chunks."
+        False,
+        description="Resume using ingest_state.json and append chunks. False rewrites JSONL from scratch.",
     )
     recreate_collection: bool = Field(
         False, description="Drop and recreate Qdrant collection before indexing."
@@ -53,3 +50,15 @@ class IngestResponse(BaseModel):
     status: str
     chunks_jsonl: str
     indexed_chunks: int
+    ingest_pages_fetched: int = Field(
+        0,
+        description="PDF files parsed this run (excluding resume skips).",
+    )
+    ingest_chunks_appended: int = Field(
+        0,
+        description="Chunk records appended to JSONL this run.",
+    )
+    message: Optional[str] = Field(
+        None,
+        description="Optional warning, e.g. when no pages were fetched but indexing still ran.",
+    )

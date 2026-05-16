@@ -1,7 +1,7 @@
 import argparse
-from typing import List
+from typing import List, Tuple
 
-from src.rag.generator import LocalTextGenerator
+from src.rag.generator import generate_answer
 from src.rag.retriever import QdrantRetriever
 
 DEFAULT_QUESTIONS = [
@@ -21,13 +21,16 @@ def main() -> None:
     questions: List[str] = args.question or DEFAULT_QUESTIONS
 
     retriever = QdrantRetriever(top_k=args.top_k)
-    generator = LocalTextGenerator()
-
-    history = []
+    history: List[Tuple[str, str]] = []
     for q in questions:
         retrieved = retriever.retrieve(q)
         context = retrieved.format_for_prompt()
-        result = generator.generate(question=q, context=context, history=history, language=None)
+        result = generate_answer(
+            question=q,
+            context=context,
+            history=history,
+            language=None,
+        )
         history.append((q, result.text))
 
         print("=" * 80)
@@ -41,4 +44,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

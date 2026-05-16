@@ -13,24 +13,9 @@ def _csv_env(name: str, default: tuple[str, ...]) -> tuple[str, ...]:
 
 @dataclass(frozen=True)
 class Settings:
-    # Source documentation
-    docs_root: str = os.getenv(
-        "DOCS_ROOT",
-        "https://docs.langchain.com/oss/python/langchain/overview",
-    )
-    docs_start_urls: tuple[str, ...] = _csv_env(
-        "DOCS_START_URLS",
-        (
-            "https://docs.langchain.com/oss/python/langchain/overview",
-            "https://docs.langchain.com/oss/python/langgraph/overview",
-        ),
-    )
-    docs_allowed_prefixes: tuple[str, ...] = _csv_env(
-        "DOCS_ALLOWED_PREFIXES",
-        (
-            "https://docs.langchain.com/oss/python/langchain/",
-            "https://docs.langchain.com/oss/python/langgraph/",
-        ),
+    # Local PDF corpus (manual download)
+    pdf_dir: Path = Path(
+        os.getenv("PDF_DIR", str(Path.home() / "Downloads" / "langchain"))
     )
 
     # Local storage
@@ -56,17 +41,16 @@ class Settings:
         "on",
     }
 
-    # LLM generation (must run locally)
-    llm_backend: str = os.getenv("LLM_BACKEND", "llama_cpp")
-    # llama.cpp backend: path to local GGUF file
-    llm_gguf_path: str = os.getenv("LLM_GGUF_PATH")
-    llm_model: str = os.getenv("LLM_MODEL", "qwen2.5-3b-instruct-q4_k_m")
+    # LLM generation (OpenAI-compatible HTTP, e.g. LM Studio)
+    llm_chat_completions_url: str = os.getenv(
+        "LLM_CHAT_COMPLETIONS_URL", None)
+    # Model id for the request (LM Studio: match the loaded model id or a common placeholder).
+    llm_model: str = os.getenv("LLM_MODEL", None)
+    llm_api_key: str | None = os.getenv("LLM_API_KEY") or None
+    llm_request_timeout_s: float = float(os.getenv("LLM_REQUEST_TIMEOUT_S", "120"))
     llm_max_new_tokens: int = int(os.getenv("LLM_MAX_NEW_TOKENS", "256"))
-    llm_max_input_tokens: int = int(os.getenv("LLM_MAX_INPUT_TOKENS", "1024"))
-    llm_temperature: float = float(os.getenv("LLM_TEMPERATURE", "0.1"))
-    llm_repetition_penalty: float = float(os.getenv("LLM_REPETITION_PENALTY", "1.1"))
-    llm_ctx: int = int(os.getenv("LLM_CTX", "8192"))
-    llm_threads: int = int(os.getenv("LLM_THREADS", "4"))
+    llm_max_input_tokens: int = int(os.getenv("LLM_MAX_INPUT_TOKENS", "2048"))
+    llm_temperature: float = float(os.getenv("LLM_TEMPERATURE", "0.6"))
 
     # Retrieval
     retrieve_top_k: int = int(os.getenv("RETRIEVE_TOP_K", "8"))

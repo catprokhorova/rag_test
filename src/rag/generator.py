@@ -1,115 +1,144 @@
 from dataclasses import dataclass
-from typing import List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
+
+import httpx
+from langchain_core.prompts import ChatPromptTemplate
 
 from src.config import settings
 from src.utils import detect_language
+
 
 @dataclass(frozen=True)
 class GenerationResult:
     text: str
 
-class LocalTextGenerator:
+
+def _build_prompt_template(language: str) -> ChatPromptTemplate:
     """
-    Local text generation.
-
-    Default backend is llama.cpp (GGUF) for low-resource CPU setups.
+    Build a ChatPromptTemplate compatible with the previous string prompt behavior.
     """
-
-    def __init__(self, *, model_name: Optional[str] = None):
-        cfg = settings()
-        self.backend = cfg.llm_backend
-        self.model_name = model_name or cfg.llm_model
-        self._llama = None
-
-        if self.backend == "llama_cpp":
-            from llama_cpp import Llama  # type: ignore
-
-            self._llama = Llama(
-                model_path=cfg.llm_gguf_path,
-                n_ctx=cfg.llm_ctx,
-                n_threads=cfg.llm_threads,
-                n_gpu_layers=0,
-                verbose=False,
-            )
-        elif self.backend == "hf_transformers":
-            raise RuntimeError(
-                "hf_transformers backend is not installed in this low-resource setup. "
-                "Set LLM_BACKEND=llama_cpp and provide LLM_GGUF_PATH."
-            )
-        else:
-            raise ValueError(f"Unknown LLM_BACKEND: {self.backend}")
-
-    def build_prompt(
-        self,
-        *,
-        question: str,
-        context: str,
-        history: List[Tuple[str, str]],
-        language: str,
-    ) -> str:
-        if language == "ru":
-            system = (
-                "Ты помощник по документации LangChain и LangGraph. Отвечай на русском. "
-                "Используй только предоставленный контекст документации. "
-                "Если в контексте нет ответа, скажи, что сведений недостаточно."
-            )
-            history_block = "\n".join(
-                [f"User: {u}\nAssistant: {a}" for (u, a) in history[-4:]]
-            )
-            if history_block:
-                history_block = f"История диалога:\n{history_block}\n\n"
-            return (
-                f"{system}\n\n"
-                f"{history_block}"
-                f"Контекст документации:\n{context}\n\n"
-                f"Вопрос пользователя:\n{question}\n\n"
-                f"Ответ:"
-            )
-
+    if language == "ru":
+        system = (
+            "Ты помощник по документации LangChain и LangGraph. Отвечай на русском. "
+            "Используй только предоставленный контекст документации. "
+            "Если в контексте нет ответа, скажи, что сведений недостаточно."
+        )
+        user = (
+            "История диалога:\n{history}\n\n"
+            "Контекст документации:\n{context}\n\n"
+            "Вопрос пользователя:\n{question}\n\n"
+            "Ответ:"
+        )
+    else:
         system = (
             "You are a LangChain and LangGraph documentation assistant. Answer in English. "
             "Use only the provided documentation context. "
             "If the answer is not present in the context, say that the information is not available."
         )
-        history_block = "\n".join([f"User: {u}\nAssistant: {a}" for (u, a) in history[-4:]])
-        if history_block:
-            history_block = f"Conversation history:\n{history_block}\n\n"
-        return (
-            f"{system}\n\n"
-            f"{history_block}"
-            f"Documentation context:\n{context}\n\n"
-            f"User question:\n{question}\n\n"
-            f"Answer:"
+        user = (
+            "Conversation history:\n{history}\n\n"
+            "Documentation context:\n{context}\n\n"
+            "User question:\n{question}\n\n"
+            "Answer:"
         )
 
-    def generate(
-        self,
-        *,
-        question: str,
-        context: str,
-        history: List[Tuple[str, str]],
-        language: Optional[str] = None,
-    ) -> GenerationResult:
-        cfg = settings()
-        lang = language or detect_language(question)
-        prompt = self.build_prompt(question=question, context=context, history=history, language=lang)
-        if self.backend != "llama_cpp" or self._llama is None:
-            raise RuntimeError("LLM is not initialized (expected llama_cpp backend).")
+    return ChatPromptTemplate.from_messages(
+        [
+            ("system", system),
+            ("user", user),
+        ]
+    )
 
-        # llama.cpp runs with a fixed context (n_ctx). We keep prompt short by:
-        # - limiting history elsewhere
-        # - limiting retrieved context formatting
-        # Additionally, allow user to control cfg.llm_max_input_tokens by truncating chars.
-        if cfg.llm_max_input_tokens and len(prompt) > cfg.llm_max_input_tokens * 4:
-            prompt = prompt[-cfg.llm_max_input_tokens * 4 :]
 
-        out = self._llama.create_completion(
-            prompt=prompt,
-            max_tokens=cfg.llm_max_new_tokens,
-            temperature=cfg.llm_temperature,
-            repeat_penalty=cfg.llm_repetition_penalty,
-            stop=["\n\nUser:", "\n\nВопрос пользователя:"],
-        )
-        text = (out.get("choices") or [{}])[0].get("text") or ""
-        return GenerationResult(text=str(text).strip())
+def _format_history(history: List[Tuple[str, str]]) -> str:
+    if not history:
+        return ""
+    return "\n".join([f"User: {u}\nAssistant: {a}" for (u, a) in history[-4:]])
 
+
+def _message_to_openai_role(msg: Any) -> str:
+    t = getattr(msg, "type", None) or msg.__class__.__name__.lower()
+    if t == "system":
+        return "system"
+    if t in ("human", "user"):
+        return "user"
+    if t in ("ai", "assistant"):
+        return "assistant"
+    return "user"
+
+
+def _chat_completions(
+    *,
+    url: str,
+    model: str,
+    messages: List[Dict[str, str]],
+    max_tokens: int,
+    temperature: float,
+    api_key: Optional[str],
+    timeout_s: float,
+) -> str:
+    headers: Dict[str, str] = {"Content-Type": "application/json"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+
+    body: Dict[str, Any] = {
+        "messages": messages,
+        "max_tokens": max_tokens,
+        "temperature": temperature,
+        "stream": False,
+    }
+    body["model"] = model
+
+    with httpx.Client(timeout=timeout_s) as client:
+        r = client.post(url, json=body, headers=headers)
+        r.raise_for_status()
+        data = r.json()
+
+    choices = data.get("choices") or []
+    if not choices:
+        raise RuntimeError("LLM response missing choices")
+    msg = choices[0].get("message") or {}
+    content = msg.get("content")
+    if content is None:
+        raise RuntimeError("LLM response missing message content")
+    return str(content).strip()
+
+
+def generate_answer(
+    *,
+    question: str,
+    context: str,
+    history: List[Tuple[str, str]],
+    language: Optional[str] = None,
+) -> GenerationResult:
+    """
+    Call an OpenAI-compatible chat completions endpoint (e.g. LM Studio) to produce an answer.
+    """
+    cfg = settings()
+    lang = language or detect_language(question)
+    prompt = _build_prompt_template(language=lang)
+
+    history_str = _format_history(history)
+    if cfg.llm_max_input_tokens and len(context) > cfg.llm_max_input_tokens * 4:
+        context = context[-cfg.llm_max_input_tokens * 4 :]
+
+    lc_messages = prompt.format_messages(
+        question=question,
+        context=context,
+        history=history_str,
+    )
+    messages = [
+        {"role": _message_to_openai_role(m), "content": m.content}
+        for m in lc_messages
+    ]
+
+    text = _chat_completions(
+        url=cfg.llm_chat_completions_url,
+        model=cfg.llm_model,
+        messages=messages,
+        max_tokens=cfg.llm_max_new_tokens,
+        temperature=cfg.llm_temperature,
+        api_key=cfg.llm_api_key,
+        timeout_s=cfg.llm_request_timeout_s,
+    )
+    return GenerationResult(text=text)

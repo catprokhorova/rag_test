@@ -1,14 +1,16 @@
 from dataclasses import dataclass
-from typing import List, Optional, Sequence
+from typing import List, Optional
 
+from langchain_core.documents import Document
 from src.config import settings
-from src.backend.infrastructure.vector_store.qdrant_store import QdrantStore, RetrievedChunk
-from src.rag.embeddings import SentenceTransformerEmbedder
+from src.backend.infrastructure.vector_store.qdrant_store import get_vector_store
+from src.rag.embeddings import get_embeddings
 
 
 @dataclass(frozen=True)
 class RetrievedContext:
-    chunks: List[RetrievedChunk]
+    documents: List[Document]
+    scores: List[float]
 
     def format_for_prompt(self, *, max_chars: int = 12000) -> str:
         """
@@ -16,8 +18,9 @@ class RetrievedContext:
         """
         parts: List[str] = []
         used = 0
-        for i, c in enumerate(self.chunks, start=1):
-            block = f"[{i}] {c.page_title}\n{c.text}"
+        for i, doc in enumerate(self.documents, start=1):
+            title = str(doc.metadata.get("page_title") or "")
+            block = f"[{i}] {title}\n{doc.page_content}"
             if used + len(block) > max_chars and parts:
                 break
             parts.append(block)
@@ -27,13 +30,13 @@ class RetrievedContext:
     def sources(self) -> List[dict]:
         return [
             {
-                "title": c.page_title,
-                "url": c.url,
-                "chunk_id": c.chunk_id,
-                "chunk_index": c.chunk_index,
-                "score": c.score,
+                "title": str(doc.metadata.get("page_title") or ""),
+                "url": str(doc.metadata.get("url") or ""),
+                "chunk_id": str(doc.metadata.get("chunk_id") or ""),
+                "chunk_index": int(doc.metadata.get("chunk_index") or 0),
+                "score": score,
             }
-            for c in self.chunks
+            for doc, score in zip(self.documents, self.scores)
         ]
 
 
@@ -41,23 +44,24 @@ class QdrantRetriever:
     def __init__(
         self,
         *,
-        embedder: Optional[SentenceTransformerEmbedder] = None,
-        store: Optional[QdrantStore] = None,
         top_k: Optional[int] = None,
         score_threshold: Optional[float] = None,
     ):
         cfg = settings()
-        self.embedder = embedder or SentenceTransformerEmbedder(model_name=cfg.embed_model)
-        self.store = store or QdrantStore()
+        self.embeddings = get_embeddings()
+        self.store = get_vector_store(self.embeddings)
         self.top_k = top_k or cfg.retrieve_top_k
         self.score_threshold = score_threshold
+        self._retriever = self.store.as_retriever(search_kwargs={"k": self.top_k})
 
     def retrieve(self, query: str) -> RetrievedContext:
-        query_vector = self.embedder.embed_query(query)
-        chunks = self.store.search(
-            query_vector=query_vector,
-            limit=self.top_k,
-            score_threshold=self.score_threshold,
-        )
-        return RetrievedContext(chunks=chunks)
+        if self.score_threshold is None:
+            docs = self._retriever.invoke(query)
+            return RetrievedContext(documents=docs, scores=[0.0] * len(docs))
+
+        scored = self.store.similarity_search_with_score(query=query, k=self.top_k)
+        filtered = [(doc, score) for doc, score in scored if score >= self.score_threshold]
+        docs = [doc for doc, _ in filtered]
+        scores = [float(score) for _, score in filtered]
+        return RetrievedContext(documents=docs, scores=scores)
 
