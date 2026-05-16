@@ -51,17 +51,17 @@ class QdrantRetriever:
         self.embeddings = get_embeddings()
         self.store = get_vector_store(self.embeddings)
         self.top_k = top_k or cfg.retrieve_top_k
-        self.score_threshold = score_threshold
-        self._retriever = self.store.as_retriever(search_kwargs={"k": self.top_k})
+        self.score_threshold = (
+            score_threshold
+            if score_threshold is not None
+            else cfg.retrieve_score_threshold
+        )
 
     def retrieve(self, query: str) -> RetrievedContext:
-        if self.score_threshold is None:
-            docs = self._retriever.invoke(query)
-            return RetrievedContext(documents=docs, scores=[0.0] * len(docs))
-
         scored = self.store.similarity_search_with_score(query=query, k=self.top_k)
-        filtered = [(doc, score) for doc, score in scored if score >= self.score_threshold]
-        docs = [doc for doc, _ in filtered]
-        scores = [float(score) for _, score in filtered]
+        if self.score_threshold is not None:
+            scored = [(doc, score) for doc, score in scored if score >= self.score_threshold]
+        docs = [doc for doc, _ in scored]
+        scores = [float(score) for _, score in scored]
         return RetrievedContext(documents=docs, scores=scores)
 

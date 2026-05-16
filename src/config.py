@@ -11,6 +11,16 @@ def _csv_env(name: str, default: tuple[str, ...]) -> tuple[str, ...]:
     return items or default
 
 
+def _optional_float_env(name: str, default: float | None) -> float | None:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    stripped = raw.strip().lower()
+    if stripped in {"", "none", "off", "disabled"}:
+        return None
+    return float(stripped)
+
+
 @dataclass(frozen=True)
 class Settings:
     # Local PDF corpus (manual download)
@@ -54,6 +64,9 @@ class Settings:
 
     # Retrieval
     retrieve_top_k: int = int(os.getenv("RETRIEVE_TOP_K", "8"))
+    retrieve_score_threshold: float | None = _optional_float_env(
+        "RETRIEVE_SCORE_THRESHOLD", 0.75
+    )
 
     # Chunking
     chunk_max_chars: int = int(os.getenv("CHUNK_MAX_CHARS", "3000"))
