@@ -26,6 +26,11 @@ class SourceItem(BaseModel):
 class ChatResponse(BaseModel):
     session_id: str
     answer: str
+
+
+class ChatResponseWithSources(ChatResponse):
+    """RAG-internal response: retrieval metadata for monitoring and attribution."""
+
     sources: List[SourceItem]
 
 

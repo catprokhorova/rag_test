@@ -1,3 +1,4 @@
+import logging
 import os
 import uuid
 
@@ -12,6 +13,7 @@ from src.backend.api.contracts.schemas import (
 )
 
 app = FastAPI(title="Backend API (facade) for Docs RAG Bot")
+logger = logging.getLogger(__name__)
 
 RAG_BASE_URL = os.getenv("RAG_BASE_URL", "http://rag:8001").rstrip("/")
 
@@ -40,8 +42,13 @@ def chat(req: ChatRequest) -> ChatResponse:
         )
 
     data = response.json()
-    data["session_id"] = session_id
-    return ChatResponse.model_validate(data)
+    sources = data.get("sources") or []
+    logger.info(
+        "chat retrieval session_id=%s chunk_ids=%s",
+        session_id,
+        [source.get("chunk_id") for source in sources],
+    )
+    return ChatResponse(session_id=session_id, answer=data["answer"])
 
 @app.post("/admin/ingest", response_model=IngestResponse)
 def admin_ingest(req: IngestRequest) -> IngestResponse:

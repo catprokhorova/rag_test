@@ -9,7 +9,7 @@ from fastapi import FastAPI, HTTPException
 
 from src.backend.api.contracts.schemas import (
     ChatRequest,
-    ChatResponse,
+    ChatResponseWithSources,
     IngestRequest,
     IngestResponse,
 )
@@ -47,8 +47,8 @@ def health() -> dict:
     return {"status": "ok"}
 
 
-@app.post("/chat", response_model=ChatResponse)
-def chat(req: ChatRequest) -> ChatResponse:
+@app.post("/chat", response_model=ChatResponseWithSources)
+def chat(req: ChatRequest) -> ChatResponseWithSources:
     global _retriever
     session_id = req.session_id or str(uuid.uuid4())
     history = _sessions.get(session_id, [])
@@ -80,10 +80,17 @@ def chat(req: ChatRequest) -> ChatResponse:
         logger.exception("LLM generation failed")
         raise HTTPException(status_code=503, detail=f"LLM generation failed: {exc}") from exc
 
+    sources = retrieved.sources()
     answer = result.text.strip()
     _sessions[session_id] = history + [(req.message, answer)]
 
-    return ChatResponse(
+    logger.info(
+        "chat completed session_id=%s chunk_ids=%s",
+        session_id,
+        [source["chunk_id"] for source in sources],
+    )
+
+    return ChatResponseWithSources(
         session_id=session_id,
         answer=answer,
         sources=[
@@ -94,7 +101,7 @@ def chat(req: ChatRequest) -> ChatResponse:
                 "chunk_index": source["chunk_index"],
                 "score": source["score"],
             }
-            for source in retrieved.sources()
+            for source in sources
         ],
     )
 

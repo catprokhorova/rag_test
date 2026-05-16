@@ -1,3 +1,5 @@
+import json
+import re
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -11,6 +13,41 @@ from src.utils import detect_language
 @dataclass(frozen=True)
 class GenerationResult:
     text: str
+    raw: str
+
+
+def _parse_answer_from_llm(content: str) -> str:
+    """
+    Return user-facing answer text from LLM output.
+
+    Supports {"answer": "..."} JSON (optionally wrapped in markdown fences).
+    Falls back to the full string when parsing fails.
+    """
+    text = content.strip()
+    if text.startswith("```"):
+        lines = text.splitlines()
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        text = "\n".join(lines).strip()
+
+    try:
+        data = json.loads(text)
+        if isinstance(data, dict) and "answer" in data:
+            return str(data["answer"]).strip()
+    except json.JSONDecodeError:
+        pass
+
+    match = re.search(
+        r'"answer"\s*:\s*"((?:[^"\\]|\\.)*)"',
+        text,
+        flags=re.DOTALL,
+    )
+    if match:
+        return json.loads(f'"{match.group(1)}"').strip()
+
+    return content.strip()
 
 
 def _build_prompt_template(language: str) -> ChatPromptTemplate:
@@ -21,25 +58,29 @@ def _build_prompt_template(language: str) -> ChatPromptTemplate:
         system = (
             "Ты помощник по документации LangChain и LangGraph. Отвечай на русском. "
             "Используй только предоставленный контекст документации. "
-            "Если в контексте нет ответа, скажи, что сведений недостаточно."
+            "Если в контексте нет ответа, скажи, что сведений недостаточно. "
+            "Отвечай только валидным JSON одним объектом с единственным ключом \"answer\". "
+            "Значение answer — связный текст для пользователя без chunk_id, ссылок на фрагменты "
+            "и номеров вида [1]."
         )
         user = (
             "История диалога:\n{history}\n\n"
             "Контекст документации:\n{context}\n\n"
-            "Вопрос пользователя:\n{question}\n\n"
-            "Ответ:"
+            "Вопрос пользователя:\n{question}"
         )
     else:
         system = (
             "You are a LangChain and LangGraph documentation assistant. Answer in English. "
             "Use only the provided documentation context. "
-            "If the answer is not present in the context, say that the information is not available."
+            "If the answer is not present in the context, say that the information is not available. "
+            "Reply with valid JSON only: a single object with the key \"answer\". "
+            "The answer value must be user-facing prose with no chunk_id values, "
+            "citations, or bracketed reference markers like [1]."
         )
         user = (
             "Conversation history:\n{history}\n\n"
             "Documentation context:\n{context}\n\n"
-            "User question:\n{question}\n\n"
-            "Answer:"
+            "User question:\n{question}"
         )
 
     return ChatPromptTemplate.from_messages(
@@ -132,7 +173,7 @@ def generate_answer(
         for m in lc_messages
     ]
 
-    text = _chat_completions(
+    raw = _chat_completions(
         url=cfg.llm_chat_completions_url,
         model=cfg.llm_model,
         messages=messages,
@@ -141,4 +182,4 @@ def generate_answer(
         api_key=cfg.llm_api_key,
         timeout_s=cfg.llm_request_timeout_s,
     )
-    return GenerationResult(text=text)
+    return GenerationResult(text=_parse_answer_from_llm(raw), raw=raw)
