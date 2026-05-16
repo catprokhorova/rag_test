@@ -1,7 +1,7 @@
 from uuid import NAMESPACE_URL, UUID, uuid5
 from typing import Optional
 
-from langchain_community.vectorstores import Qdrant
+from langchain_qdrant import QdrantVectorStore
 from qdrant_client import QdrantClient
 from qdrant_client.http import models as qmodels
 
@@ -70,11 +70,11 @@ def to_qdrant_point_id(point_id: str) -> str | int:
         return str(uuid5(NAMESPACE_URL, str(point_id)))
 
 
-def get_vector_store(embeddings) -> Qdrant:
+def get_vector_store(embeddings) -> QdrantVectorStore:
     cfg = settings()
     client = qdrant_client_from_settings()
-    return Qdrant(
+    return QdrantVectorStore(
         client=client,
         collection_name=cfg.qdrant_collection,
-        embeddings=embeddings,
+        embedding=embeddings,
     )

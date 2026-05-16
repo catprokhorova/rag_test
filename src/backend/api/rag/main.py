@@ -4,6 +4,7 @@ import time
 import uuid
 from typing import Dict, List, Optional, Tuple
 
+import httpx
 from fastapi import FastAPI, HTTPException
 
 from src.backend.api.contracts.schemas import (
@@ -24,20 +25,6 @@ logger = logging.getLogger(__name__)
 
 _sessions: Dict[str, List[Tuple[str, str]]] = {}
 _retriever: Optional[QdrantRetriever] = None
-
-
-def _run_rag(question: str, history: List[Tuple[str, str]], language: Optional[str]):
-    retrieved = _get_retriever().retrieve(question)
-    context = retrieved.format_for_prompt()
-    if language == "auto":
-        language = None
-    result = generate_answer(
-        question=question,
-        context=context,
-        history=history,
-        language=language,
-    )
-    return result, retrieved
 
 
 @app.on_event("startup")
@@ -68,10 +55,30 @@ def chat(req: ChatRequest) -> ChatResponse:
     history = history[-4:]
 
     try:
-        result, retrieved = _run_rag(req.message, history, req.language)
+        retrieved = _get_retriever().retrieve(req.message)
     except Exception as exc:
-        logger.exception("Retriever initialization/query failed")
+        logger.exception("Retrieval failed")
         raise HTTPException(status_code=503, detail=f"Retriever unavailable: {exc}") from exc
+
+    context = retrieved.format_for_prompt()
+    lang = None if req.language == "auto" else req.language
+    try:
+        result = generate_answer(
+            question=req.message,
+            context=context,
+            history=history,
+            language=lang,
+        )
+    except httpx.HTTPError as exc:
+        cfg = settings()
+        logger.exception("LLM generation failed")
+        raise HTTPException(
+            status_code=503,
+            detail=f"LLM unreachable at {cfg.llm_chat_completions_url!r}: {exc}",
+        ) from exc
+    except Exception as exc:
+        logger.exception("LLM generation failed")
+        raise HTTPException(status_code=503, detail=f"LLM generation failed: {exc}") from exc
 
     answer = result.text.strip()
     _sessions[session_id] = history + [(req.message, answer)]
