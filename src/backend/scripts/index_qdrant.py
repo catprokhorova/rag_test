@@ -13,7 +13,7 @@ from src.backend.infrastructure.vector_store.qdrant_store import (
     to_qdrant_point_id,
 )
 from src.config import settings
-from src.rag.embeddings import get_embeddings
+from src.rag.embeddings import embedding_vector_size, get_embeddings
 
 
 def iter_chunks_jsonl(path: Path) -> Iterable[Dict]:
@@ -36,11 +36,12 @@ def index_chunks(
         raise FileNotFoundError(f"Chunks file not found: {chunks_jsonl}")
 
     embeddings = embeddings or get_embeddings()
+    vector_size = embedding_vector_size(embeddings)
 
     if recreate_collection:
         delete_collection_if_exists()
 
-    ensure_collection(vector_size=512)
+    ensure_collection(vector_size=vector_size)
     store = get_vector_store(embeddings)
 
     batch_docs: List[Document] = []
@@ -64,10 +65,12 @@ def index_chunks(
             Document(
                 page_content=chunk["text"],
                 metadata={
-                "chunk_id": chunk_id,
-                "page_title": chunk.get("page_title", ""),
-                "url": chunk.get("url", ""),
-                "chunk_index": chunk.get("chunk_index", 0),
+                    "chunk_id": chunk_id,
+                    "page_title": chunk.get("page_title", ""),
+                    "url": chunk.get("url", ""),
+                    "chunk_index": chunk.get("chunk_index", 0),
+                    "source_file": chunk.get("source_file", ""),
+                    "page": chunk.get("page"),
                 },
             )
         )

@@ -5,19 +5,17 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-# lxml runtime libs; build-essential helps pip when a wheel is unavailable
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
-    libxml2 \
-    libxslt1.1 \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.rag.txt /app/requirements.rag.txt
-RUN pip install --no-cache-dir -r /app/requirements.rag.txt
+# sentence-transformers needs torch; install CPU wheel first to avoid nvidia-cuda-* deps.
+RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu \
+    && pip install --no-cache-dir -r /app/requirements.rag.txt
 
 COPY src /app/src
 
-# HF caches can be mounted as volumes for faster restarts.
 ENV HF_HOME=/hf \
     TRANSFORMERS_CACHE=/hf/transformers \
     HUGGINGFACE_HUB_CACHE=/hf/hub

@@ -98,18 +98,19 @@ def admin_ingest(req: IngestRequest) -> IngestResponse:
     cfg = settings()
     chunks_jsonl = Path(cfg.data_dir) / "processed" / "docs_chunks.jsonl"
     started_at = time.perf_counter()
+    pdf_dir = Path(req.pdf_dir) if req.pdf_dir else cfg.pdf_dir
     logger.info(
-        "Admin ingest started (max_pages=%s, resume=%s, recreate_collection=%s)",
-        req.max_pages,
+        "Admin ingest started (pdf_dir=%s, max_pdfs=%s, resume=%s, recreate_collection=%s)",
+        pdf_dir,
+        req.max_pdfs,
         req.resume,
         req.recreate_collection,
     )
 
     try:
-        ingest(
-            start_urls=req.start_urls,
-            allowed_prefixes=req.allowed_prefixes,
-            max_pages=req.max_pages,
+        ingest_outcome = ingest(
+            pdf_dir=pdf_dir,
+            max_pdfs=req.max_pdfs,
             output_jsonl=chunks_jsonl,
             resume=req.resume,
         )
@@ -125,14 +126,27 @@ def admin_ingest(req: IngestRequest) -> IngestResponse:
         raise HTTPException(status_code=500, detail=f"Ingestion failed: {exc}") from exc
     elapsed_ms = int((time.perf_counter() - started_at) * 1000)
     logger.info(
-        "Admin ingest completed (indexed_chunks=%d, chunks_jsonl=%s, elapsed_ms=%d)",
+        "Admin ingest completed (indexed_chunks=%d, pdfs_processed=%d, chunks_appended=%d, chunks_jsonl=%s, elapsed_ms=%d)",
         indexed_chunks,
+        ingest_outcome.pdfs_processed,
+        ingest_outcome.chunks_appended,
         chunks_jsonl,
         elapsed_ms,
     )
+
+    note: Optional[str] = None
+    if ingest_outcome.pdfs_processed == 0:
+        note = (
+            "No PDF files were parsed (directory empty, wrong PDF_DIR, or all files skipped on resume). "
+            "indexed_chunks may only reflect re-embedding of existing JSONL. "
+            "Mount or copy PDFs into the container and set PDF_DIR."
+        )
 
     return IngestResponse(
         status="ok",
         chunks_jsonl=str(chunks_jsonl),
         indexed_chunks=indexed_chunks,
+        ingest_pages_fetched=ingest_outcome.pages_fetched,
+        ingest_chunks_appended=ingest_outcome.chunks_appended,
+        message=note,
     )

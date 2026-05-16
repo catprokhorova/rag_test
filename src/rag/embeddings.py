@@ -34,7 +34,7 @@ class E5HuggingFaceEmbeddings(HuggingFaceEmbeddings):
         return super().embed_documents(self._prefix_passages(texts))
 
     def embed_query(self, text: str) -> List[float]:
-        return super().embed_query(query)
+        return super().embed_query(f"query: {text}")
 
 
 @lru_cache(maxsize=1)
@@ -43,4 +43,10 @@ def get_embeddings() -> E5HuggingFaceEmbeddings:
     return E5HuggingFaceEmbeddings(
         model_name=cfg.embed_model
     )
+
+
+def embedding_vector_size(embeddings: E5HuggingFaceEmbeddings) -> int:
+    """Infer vector dimension from the configured embedding model."""
+    probe = embeddings.embed_query("dimension probe")
+    return len(probe)
 

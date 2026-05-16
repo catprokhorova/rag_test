@@ -1,1 +1,1 @@
-"""Offline ingestion utilities for documentation corpora."""
+"""Offline PDF ingestion and chunking for the documentation corpus."""

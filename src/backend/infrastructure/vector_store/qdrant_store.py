@@ -18,6 +18,23 @@ def ensure_collection(*, vector_size: int, collection_name: Optional[str] = None
     client = qdrant_client_from_settings()
     existing = client.get_collections().collections
     if any(collection.name == name for collection in existing):
+        info = client.get_collection(name)
+        params = info.config.params.vectors
+        if params is None:
+            return
+        existing_size: Optional[int] = None
+        if isinstance(params, qmodels.VectorParams):
+            existing_size = params.size
+        elif isinstance(params, dict):
+            first = next(iter(params.values()), None)
+            if isinstance(first, qmodels.VectorParams):
+                existing_size = first.size
+        if existing_size is not None and existing_size != vector_size:
+            raise ValueError(
+                f"Qdrant collection {name!r} has vector size {existing_size}, "
+                f"but the embedding model produces {vector_size}. "
+                "Drop the collection or call ingest with recreate_collection=true."
+            )
         return
     client.create_collection(
         collection_name=name,
