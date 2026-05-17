@@ -1,3 +1,4 @@
+from contextlib import nullcontext
 from pathlib import Path
 import logging
 import time
@@ -6,6 +7,7 @@ from typing import Dict, List, Optional, Tuple
 
 import httpx
 from fastapi import FastAPI, HTTPException
+from langfuse import get_client, observe, propagate_attributes
 
 from src.backend.api.contracts.schemas import (
     ChatRequest,
@@ -14,10 +16,11 @@ from src.backend.api.contracts.schemas import (
     IngestResponse,
 )
 from src.backend.scripts.index_qdrant import index_chunks
+from src.config import settings
+from src.observability.langfuse_client import langfuse_enabled, shutdown_tracing
 from src.prep.ingest_docs import ingest
 from src.rag.generator import generate_answer
 from src.rag.retriever import QdrantRetriever
-from src.config import settings
 
 
 app = FastAPI(title="Docs RAG Bot (local, offline)")
@@ -31,8 +34,15 @@ _retriever: Optional[QdrantRetriever] = None
 def _startup() -> None:
     global _retriever
     _ = settings()
+    if langfuse_enabled():
+        get_client()
     # Warm model-dependent services once during startup, so requests only use in-memory instances.
     _retriever = QdrantRetriever()
+
+
+@app.on_event("shutdown")
+def _shutdown() -> None:
+    shutdown_tracing()
 
 
 def _get_retriever() -> QdrantRetriever:
@@ -47,10 +57,7 @@ def health() -> dict:
     return {"status": "ok"}
 
 
-@app.post("/chat", response_model=ChatResponseWithSources)
-def chat(req: ChatRequest) -> ChatResponseWithSources:
-    global _retriever
-    session_id = req.session_id or str(uuid.uuid4())
+def _run_chat(req: ChatRequest, session_id: str) -> ChatResponseWithSources:
     history = _sessions.get(session_id, [])
     history = history[-4:]
 
@@ -106,9 +113,42 @@ def chat(req: ChatRequest) -> ChatResponseWithSources:
     )
 
 
-@app.post("/admin/ingest", response_model=IngestResponse)
-def admin_ingest(req: IngestRequest) -> IngestResponse:
+@observe(name="docs-rag-chat", capture_input=False, capture_output=False)
+def _run_chat_traced(req: ChatRequest, session_id: str) -> ChatResponseWithSources:
+    langfuse = get_client()
+    langfuse.update_current_span(
+        input={"question": req.message, "language": req.language},
+    )
+    with propagate_attributes(session_id=session_id, tags=["docs-rag"]):
+        response = _run_chat(req, session_id)
+    langfuse.update_current_span(output={"answer": response.answer})
+    return response
+
+
+@app.post("/chat", response_model=ChatResponseWithSources)
+def chat(req: ChatRequest) -> ChatResponseWithSources:
+    session_id = req.session_id or str(uuid.uuid4())
+    if langfuse_enabled():
+        return _run_chat_traced(req, session_id)
+    return _run_chat(req, session_id)
+
+
+@observe(name="docs-rag-ingest", capture_input=False, capture_output=False)
+def _run_ingest(req: IngestRequest) -> IngestResponse:
     global _retriever
+    if langfuse_enabled():
+        get_client().update_current_span(
+            input={
+                "pdf_dir": req.pdf_dir,
+                "max_pdfs": req.max_pdfs,
+                "resume": req.resume,
+                "recreate_collection": req.recreate_collection,
+            },
+        )
+        propagate_ctx = propagate_attributes(tags=["docs-rag", "ingest"])
+    else:
+        propagate_ctx = nullcontext()
+
     cfg = settings()
     chunks_jsonl = Path(cfg.data_dir) / "processed" / "docs_chunks.jsonl"
     started_at = time.perf_counter()
@@ -122,18 +162,19 @@ def admin_ingest(req: IngestRequest) -> IngestResponse:
     )
 
     try:
-        ingest_outcome = ingest(
-            pdf_dir=pdf_dir,
-            max_pdfs=req.max_pdfs,
-            output_jsonl=chunks_jsonl,
-            resume=req.resume,
-        )
-        indexed_chunks = index_chunks(
-            chunks_jsonl=chunks_jsonl,
-            batch_size=cfg.embedding_batch_size,
-            recreate_collection=req.recreate_collection,
-        )
-        _retriever = QdrantRetriever()
+        with propagate_ctx:
+            ingest_outcome = ingest(
+                pdf_dir=pdf_dir,
+                max_pdfs=req.max_pdfs,
+                output_jsonl=chunks_jsonl,
+                resume=req.resume,
+            )
+            indexed_chunks = index_chunks(
+                chunks_jsonl=chunks_jsonl,
+                batch_size=cfg.embedding_batch_size,
+                recreate_collection=req.recreate_collection,
+            )
+            _retriever = QdrantRetriever()
     except Exception as exc:
         elapsed_ms = int((time.perf_counter() - started_at) * 1000)
         logger.exception("Admin ingest failed after %dms", elapsed_ms)
@@ -156,7 +197,7 @@ def admin_ingest(req: IngestRequest) -> IngestResponse:
             "Mount or copy PDFs into the container and set PDF_DIR."
         )
 
-    return IngestResponse(
+    response = IngestResponse(
         status="ok",
         chunks_jsonl=str(chunks_jsonl),
         indexed_chunks=indexed_chunks,
@@ -164,3 +205,16 @@ def admin_ingest(req: IngestRequest) -> IngestResponse:
         ingest_chunks_appended=ingest_outcome.chunks_appended,
         message=note,
     )
+    if langfuse_enabled():
+        get_client().update_current_span(
+            output={
+                "indexed_chunks": response.indexed_chunks,
+                "ingest_chunks_appended": response.ingest_chunks_appended,
+            }
+        )
+    return response
+
+
+@app.post("/admin/ingest", response_model=IngestResponse)
+def admin_ingest(req: IngestRequest) -> IngestResponse:
+    return _run_ingest(req)
