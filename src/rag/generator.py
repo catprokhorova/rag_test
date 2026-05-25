@@ -5,8 +5,10 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
 from langchain_core.prompts import ChatPromptTemplate
+from langfuse import get_client, observe
 
 from src.config import settings
+from src.observability.phoenix_client import chain_span, llm_span
 from src.utils import detect_language
 
 
@@ -108,6 +110,8 @@ def _message_to_openai_role(msg: Any) -> str:
     return "user"
 
 
+@llm_span("llm-generation")
+@observe(name="llm-generation", as_type="generation", capture_input=False, capture_output=False)
 def _chat_completions(
     *,
     url: str,
@@ -118,6 +122,13 @@ def _chat_completions(
     api_key: Optional[str],
     timeout_s: float,
 ) -> str:
+    langfuse = get_client()
+    langfuse.update_current_generation(
+        input=messages,
+        model=model,
+        metadata={"endpoint": url},
+    )
+
     headers: Dict[str, str] = {"Content-Type": "application/json"}
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
@@ -142,9 +153,23 @@ def _chat_completions(
     content = msg.get("content")
     if content is None:
         raise RuntimeError("LLM response missing message content")
+
+    usage = data.get("usage") or {}
+    usage_details: Dict[str, int] = {}
+    if usage.get("prompt_tokens") is not None:
+        usage_details["input"] = int(usage["prompt_tokens"])
+    if usage.get("completion_tokens") is not None:
+        usage_details["output"] = int(usage["completion_tokens"])
+
+    langfuse.update_current_generation(
+        output=content,
+        usage_details=usage_details or None,
+    )
     return str(content).strip()
 
 
+@chain_span("generate-answer")
+@observe(name="generate-answer", as_type="span", capture_input=False, capture_output=False)
 def generate_answer(
     *,
     question: str,
@@ -157,6 +182,10 @@ def generate_answer(
     """
     cfg = settings()
     lang = language or detect_language(question)
+    get_client().update_current_span(
+        input={"question": question, "language": lang},
+        metadata={"context_chars": len(context), "history_turns": len(history)},
+    )
     prompt = _build_prompt_template(language=lang)
 
     history_str = _format_history(history)
@@ -182,4 +211,6 @@ def generate_answer(
         api_key=cfg.llm_api_key,
         timeout_s=cfg.llm_request_timeout_s,
     )
-    return GenerationResult(text=_parse_answer_from_llm(raw), raw=raw)
+    result = GenerationResult(text=_parse_answer_from_llm(raw), raw=raw)
+    get_client().update_current_span(output={"answer": result.text})
+    return result

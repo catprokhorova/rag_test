@@ -2,8 +2,10 @@ from dataclasses import dataclass
 from typing import List, Optional
 
 from langchain_core.documents import Document
-from src.config import settings
+from langfuse import observe
 from src.backend.infrastructure.vector_store.qdrant_store import get_vector_store
+from src.config import settings
+from src.observability.phoenix_client import retriever_span
 from src.rag.embeddings import get_embeddings
 
 
@@ -57,11 +59,25 @@ class QdrantRetriever:
             else cfg.retrieve_score_threshold
         )
 
+    @retriever_span("retrieve-docs")
+    @observe(name="retrieve-docs", as_type="span", capture_input=False, capture_output=False)
     def retrieve(self, query: str) -> RetrievedContext:
+        from langfuse import get_client
+
+        get_client().update_current_span(input={"query": query})
+
         scored = self.store.similarity_search_with_score(query=query, k=self.top_k)
         if self.score_threshold is not None:
             scored = [(doc, score) for doc, score in scored if score >= self.score_threshold]
         docs = [doc for doc, _ in scored]
         scores = [float(score) for _, score in scored]
-        return RetrievedContext(documents=docs, scores=scores)
+        context = RetrievedContext(documents=docs, scores=scores)
+
+        get_client().update_current_span(
+            output={
+                "num_chunks": len(docs),
+                "sources": context.sources(),
+            }
+        )
+        return context
 

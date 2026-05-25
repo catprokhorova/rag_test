@@ -46,3 +46,14 @@ services:
       - .env
     ports:
       - "8000:8000"
+
+  nginx:
+    build:
+      context: .
+      dockerfile: Dockerfile.nginx
+    depends_on:
+      - backend
+    environment:
+      - AUTH_TOKEN=${AUTH_TOKEN}
+    ports:
+      - "80:80"

@@ -10,3 +10,6 @@ pypdf==6.11.0
 qdrant-client==1.18.0
 sentence-transformers==5.5.0
 httpx==0.28.1
+langfuse==4.6.1
+arize-phoenix-otel>=0.16.0
+openinference-instrumentation-langchain>=0.1.30
