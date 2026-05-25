@@ -104,6 +104,7 @@ def retriever_span(name: str = "retrieve-docs") -> Callable[[F], F]:
                 return fn(*args, **kwargs)
 
             from opentelemetry.trace import Status, StatusCode
+            from openinference.semconv.trace import OpenInferenceSpanKindValues
 
             query = kwargs.get("query")
             if query is None and len(args) > 1:
@@ -111,7 +112,7 @@ def retriever_span(name: str = "retrieve-docs") -> Callable[[F], F]:
 
             with tracer.start_as_current_span(
                 name,
-                openinference_span_kind="RETRIEVER",
+                openinference_span_kind=OpenInferenceSpanKindValues.RETRIEVER,
             ) as span:
                 if query is not None and hasattr(span, "set_input"):
                     span.set_input({"query": query})
