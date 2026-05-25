@@ -1,6 +1,7 @@
 import argparse
 from typing import List, Tuple
 
+from src.observability.phoenix_client import setup_phoenix, shutdown_phoenix
 from src.rag.generator import generate_answer
 from src.rag.retriever import QdrantRetriever
 
@@ -20,7 +21,15 @@ def main() -> None:
     args = build_argparser().parse_args()
     questions: List[str] = args.question or DEFAULT_QUESTIONS
 
-    retriever = QdrantRetriever(top_k=args.top_k)
+    setup_phoenix()
+    try:
+        _run(questions, top_k=args.top_k)
+    finally:
+        shutdown_phoenix()
+
+
+def _run(questions: List[str], *, top_k: int | None) -> None:
+    retriever = QdrantRetriever(top_k=top_k)
     history: List[Tuple[str, str]] = []
     for q in questions:
         retrieved = retriever.retrieve(q)

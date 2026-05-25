@@ -18,6 +18,12 @@ from src.backend.api.contracts.schemas import (
 from src.backend.scripts.index_qdrant import index_chunks
 from src.config import settings
 from src.observability.langfuse_client import langfuse_enabled, shutdown_tracing
+from src.observability.phoenix_client import (
+    phoenix_enabled,
+    setup_phoenix,
+    shutdown_phoenix,
+)
+from phoenix.otel import using_session
 from src.prep.ingest_docs import ingest
 from src.rag.generator import generate_answer
 from src.rag.retriever import QdrantRetriever
@@ -36,6 +42,7 @@ def _startup() -> None:
     _ = settings()
     if langfuse_enabled():
         get_client()
+    setup_phoenix()
     # Warm model-dependent services once during startup, so requests only use in-memory instances.
     _retriever = QdrantRetriever()
 
@@ -43,6 +50,7 @@ def _startup() -> None:
 @app.on_event("shutdown")
 def _shutdown() -> None:
     shutdown_tracing()
+    shutdown_phoenix()
 
 
 def _get_retriever() -> QdrantRetriever:
@@ -125,12 +133,22 @@ def _run_chat_traced(req: ChatRequest, session_id: str) -> ChatResponseWithSourc
     return response
 
 
+def _with_phoenix_session(session_id: str, fn):
+    if not phoenix_enabled():
+        return fn()
+    with using_session(session_id):
+        return fn()
+
+
 @app.post("/chat", response_model=ChatResponseWithSources)
 def chat(req: ChatRequest) -> ChatResponseWithSources:
     session_id = req.session_id or str(uuid.uuid4())
     if langfuse_enabled():
-        return _run_chat_traced(req, session_id)
-    return _run_chat(req, session_id)
+        return _with_phoenix_session(
+            session_id,
+            lambda: _run_chat_traced(req, session_id),
+        )
+    return _with_phoenix_session(session_id, lambda: _run_chat(req, session_id))
 
 
 @observe(name="docs-rag-ingest", capture_input=False, capture_output=False)

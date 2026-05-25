@@ -8,6 +8,7 @@ from langchain_core.prompts import ChatPromptTemplate
 from langfuse import get_client, observe
 
 from src.config import settings
+from src.observability.phoenix_client import chain_span, llm_span
 from src.utils import detect_language
 
 
@@ -109,6 +110,7 @@ def _message_to_openai_role(msg: Any) -> str:
     return "user"
 
 
+@llm_span("llm-generation")
 @observe(name="llm-generation", as_type="generation", capture_input=False, capture_output=False)
 def _chat_completions(
     *,
@@ -166,6 +168,7 @@ def _chat_completions(
     return str(content).strip()
 
 
+@chain_span("generate-answer")
 @observe(name="generate-answer", as_type="span", capture_input=False, capture_output=False)
 def generate_answer(
     *,

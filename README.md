@@ -124,6 +124,25 @@ curl -X POST http://localhost:8000/admin/ingest \
   -d '{"pdf_dir":"/pdfs","resume":false,"recreate_collection":true}'
 ```
 
+## Observability (Langfuse + Phoenix)
+
+The RAG service can send traces to **Langfuse** and **Arize Phoenix** at the same time.
+
+**Langfuse** — set `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, and optionally `LANGFUSE_BASE_URL` in `.env`.
+
+**Phoenix (local)** — with Phoenix running (e.g. `PHOENIX_COLLECTOR_ENDPOINT=http://localhost:6006`):
+
+```bash
+export PHOENIX_COLLECTOR_ENDPOINT=http://localhost:6006
+export PHOENIX_PROJECT_NAME=docs-rag
+```
+
+Open the UI at [http://localhost:6006](http://localhost:6006). Spans use OpenInference kinds: `RETRIEVER` (Qdrant), `CHAIN` (answer generation), `LLM` (HTTP chat completions). `PHOENIX_AUTO_INSTRUMENT=true` (default) also traces LangChain when `openinference-instrumentation-langchain` is installed.
+
+From Docker, point at the host collector: `PHOENIX_COLLECTOR_ENDPOINT=http://host.docker.internal:6006`.
+
+See `.env.example` for all observability variables.
+
 ## Quick local eval
 
 ```bash

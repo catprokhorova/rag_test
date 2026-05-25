@@ -3,9 +3,9 @@ from typing import List, Optional
 
 from langchain_core.documents import Document
 from langfuse import observe
-
 from src.backend.infrastructure.vector_store.qdrant_store import get_vector_store
 from src.config import settings
+from src.observability.phoenix_client import retriever_span
 from src.rag.embeddings import get_embeddings
 
 
@@ -59,6 +59,7 @@ class QdrantRetriever:
             else cfg.retrieve_score_threshold
         )
 
+    @retriever_span("retrieve-docs")
     @observe(name="retrieve-docs", as_type="span", capture_input=False, capture_output=False)
     def retrieve(self, query: str) -> RetrievedContext:
         from langfuse import get_client
