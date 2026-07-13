@@ -1,9 +1,9 @@
 import json
 import re
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
-import httpx
+import openai
 from langchain_core.prompts import ChatPromptTemplate
 from langfuse import get_client, observe
 
@@ -99,67 +99,70 @@ def _format_history(history: List[Tuple[str, str]]) -> str:
     return "\n".join([f"User: {u}\nAssistant: {a}" for (u, a) in history[-4:]])
 
 
-def _message_to_openai_role(msg: Any) -> str:
-    t = getattr(msg, "type", None) or msg.__class__.__name__.lower()
-    if t == "system":
-        return "system"
-    if t in ("human", "user"):
-        return "user"
-    if t in ("ai", "assistant"):
-        return "assistant"
-    return "user"
+def _split_instructions_and_input(messages: List[Dict[str, str]]) -> Tuple[str, str]:
+    """Map chat-style messages to Responses API instructions + input."""
+    instructions_parts: List[str] = []
+    input_parts: List[str] = []
+    for msg in messages:
+        role = msg.get("role", "user")
+        content = msg.get("content", "")
+        if role == "system":
+            instructions_parts.append(content)
+        else:
+            input_parts.append(content)
+    return "\n\n".join(instructions_parts).strip(), "\n\n".join(input_parts).strip()
 
 
 @llm_span("llm-generation")
 @observe(name="llm-generation", as_type="generation", capture_input=False, capture_output=False)
-def _chat_completions(
+def _yandex_responses(
     *,
-    url: str,
+    folder: str,
     model: str,
+    base_url: str,
     messages: List[Dict[str, str]],
-    max_tokens: int,
+    max_output_tokens: int,
     temperature: float,
-    api_key: Optional[str],
+    api_key: str,
     timeout_s: float,
 ) -> str:
+    model_uri = f"gpt://{folder}/{model}"
+    instructions, input_text = _split_instructions_and_input(messages)
+
     langfuse = get_client()
     langfuse.update_current_generation(
         input=messages,
-        model=model,
-        metadata={"endpoint": url},
+        model=model_uri,
+        metadata={"endpoint": base_url, "folder": folder},
     )
 
-    headers: Dict[str, str] = {"Content-Type": "application/json"}
-    if api_key:
-        headers["Authorization"] = f"Bearer {api_key}"
+    client = openai.OpenAI(
+        api_key=api_key,
+        base_url=base_url,
+        project=folder,
+        timeout=timeout_s,
+    )
+    response = client.responses.create(
+        model=model_uri,
+        temperature=temperature,
+        instructions=instructions,
+        input=input_text,
+        max_output_tokens=max_output_tokens,
+    )
 
-    body: Dict[str, Any] = {
-        "messages": messages,
-        "max_tokens": max_tokens,
-        "temperature": temperature,
-        "stream": False,
-    }
-    body["model"] = model
-
-    with httpx.Client(timeout=timeout_s) as client:
-        r = client.post(url, json=body, headers=headers)
-        r.raise_for_status()
-        data = r.json()
-
-    choices = data.get("choices") or []
-    if not choices:
-        raise RuntimeError("LLM response missing choices")
-    msg = choices[0].get("message") or {}
-    content = msg.get("content")
+    content = response.output_text
     if content is None:
-        raise RuntimeError("LLM response missing message content")
+        raise RuntimeError("LLM response missing output_text")
 
-    usage = data.get("usage") or {}
+    usage = getattr(response, "usage", None)
     usage_details: Dict[str, int] = {}
-    if usage.get("prompt_tokens") is not None:
-        usage_details["input"] = int(usage["prompt_tokens"])
-    if usage.get("completion_tokens") is not None:
-        usage_details["output"] = int(usage["completion_tokens"])
+    if usage is not None:
+        input_tokens = getattr(usage, "input_tokens", None)
+        output_tokens = getattr(usage, "output_tokens", None)
+        if input_tokens is not None:
+            usage_details["input"] = int(input_tokens)
+        if output_tokens is not None:
+            usage_details["output"] = int(output_tokens)
 
     langfuse.update_current_generation(
         output=content,
@@ -178,9 +181,12 @@ def generate_answer(
     language: Optional[str] = None,
 ) -> GenerationResult:
     """
-    Call an OpenAI-compatible chat completions endpoint (e.g. LM Studio) to produce an answer.
+    Call Yandex Cloud AI Studio (Responses API) to produce an answer.
     """
     cfg = settings()
+    if not cfg.yandex_cloud_api_key:
+        raise RuntimeError("YANDEX_CLOUD_API_KEY is not set")
+
     lang = language or detect_language(question)
     get_client().update_current_span(
         input={"question": question, "language": lang},
@@ -198,17 +204,21 @@ def generate_answer(
         history=history_str,
     )
     messages = [
-        {"role": _message_to_openai_role(m), "content": m.content}
+        {
+            "role": "system" if getattr(m, "type", None) == "system" else "user",
+            "content": m.content,
+        }
         for m in lc_messages
     ]
 
-    raw = _chat_completions(
-        url=cfg.llm_chat_completions_url,
-        model=cfg.llm_model,
+    raw = _yandex_responses(
+        folder=cfg.yandex_cloud_folder,
+        model=cfg.yandex_cloud_model,
+        base_url=cfg.yandex_cloud_base_url,
         messages=messages,
-        max_tokens=cfg.llm_max_new_tokens,
+        max_output_tokens=cfg.llm_max_new_tokens,
         temperature=cfg.llm_temperature,
-        api_key=cfg.llm_api_key,
+        api_key=cfg.yandex_cloud_api_key,
         timeout_s=cfg.llm_request_timeout_s,
     )
     result = GenerationResult(text=_parse_answer_from_llm(raw), raw=raw)

@@ -1,12 +1,12 @@
 # rag_test
 
-Local RAG chatbot for LangChain/LangGraph documentation: PDF ingestion → Qdrant → retrieval → **text generation via an OpenAI-compatible HTTP API** (e.g. [LM Studio](https://lmstudio.ai/) on your machine).
+Local RAG chatbot for LangChain/LangGraph documentation: PDF ingestion → Qdrant → retrieval → **text generation via [Yandex Cloud AI Studio](https://yandex.cloud/en/services/ai-studio)** (OpenAI-compatible Responses API).
 
 ## Requirements
 
 - Python 3.10+
 - LangChain PDFs on disk (manual download; not crawled from the web)
-- A running **chat completions** endpoint compatible with OpenAI’s `/v1/chat/completions` shape (LM Studio’s local server is the typical setup)
+- A **Yandex Cloud** folder + API key with access to AI Studio models
 - Local **Qdrant** (or a reachable Qdrant instance configured in `.env`)
 
 Install dependencies:
@@ -20,18 +20,19 @@ pip install -r requirements.backend.txt
 
 Copy `.env.example` to `.env` and set at least:
 
-- **`LLM_CHAT_COMPLETIONS_URL`** — full URL to the chat endpoint, e.g. `http://127.0.0.1:1234/v1/chat/completions` when the RAG process runs on the same host as LM Studio.
-- **`LLM_MODEL`** — model id string LM Studio expects for the loaded model (see the LM Studio UI if requests fail with a model error).
+- **`YANDEX_CLOUD_API_KEY`** — Yandex Cloud API key.
+- **`YANDEX_CLOUD_FOLDER`** — cloud folder id (used as `project` and in the `gpt://…` model URI).
+- **`YANDEX_CLOUD_MODEL`** — model id, e.g. `aliceai-llm-flash/latest`.
 - **`PDF_DIR`** — directory containing `*.pdf` files (default: `~/Downloads/langchain`).
 
-Optional: `LLM_API_KEY`, `LLM_REQUEST_TIMEOUT_S`, generation limits (`LLM_MAX_NEW_TOKENS`, etc.). See `.env.example`.
+Optional: `YANDEX_CLOUD_BASE_URL`, `LLM_REQUEST_TIMEOUT_S`, generation limits (`LLM_MAX_NEW_TOKENS`, etc.). See `.env.example`.
 
 ## Run with Docker Compose
 
 Services in `docker-compose.yml`:
 
 - **`qdrant`** — vector database
-- **`rag`** — PDF ingest, embeddings, retrieval, and **HTTP calls** to your configured LLM URL (`8001`)
+- **`rag`** — PDF ingest, embeddings, retrieval, and Yandex Cloud LLM calls (`8001`)
 - **`backend`** — facade API (`8000`); forwards chat to `rag`
 
 Place PDFs on the host and point Compose at that folder (default mount: `./pdfs` → `/pdfs` in the container):
@@ -44,7 +45,7 @@ mkdir -p pdfs && cp ~/Downloads/langchain/*.pdf pdfs/
 # PDF_DIR_HOST=/home/you/Downloads/langchain
 ```
 
-Start LM Studio (or your server) on the host, then:
+Ensure `YANDEX_CLOUD_API_KEY` is set in `.env`, then:
 
 ```bash
 docker compose up --build
@@ -137,7 +138,7 @@ export PHOENIX_COLLECTOR_ENDPOINT=http://localhost:6006
 export PHOENIX_PROJECT_NAME=docs-rag
 ```
 
-Open the UI at [http://localhost:6006](http://localhost:6006). Spans use OpenInference kinds: `RETRIEVER` (Qdrant), `CHAIN` (answer generation), `LLM` (HTTP chat completions). `PHOENIX_AUTO_INSTRUMENT=true` (default) also traces LangChain when `openinference-instrumentation-langchain` is installed.
+Open the UI at [http://localhost:6006](http://localhost:6006). Spans use OpenInference kinds: `RETRIEVER` (Qdrant), `CHAIN` (answer generation), `LLM` (Yandex Responses API). `PHOENIX_AUTO_INSTRUMENT=true` (default) also traces LangChain when `openinference-instrumentation-langchain` is installed.
 
 From Docker, point at the host collector: `PHOENIX_COLLECTOR_ENDPOINT=http://host.docker.internal:6006`.
 
@@ -154,6 +155,6 @@ python -m src.eval.run_eval
 - `src/prep/`: PDF ingestion and chunking
 - `src/backend/infrastructure/`: integrations and storage (Qdrant)
 - `src/backend/scripts/`: indexing scripts
-- `src/rag/`: embeddings, retriever, generator (HTTP chat completions)
+- `src/rag/`: embeddings, retriever, generator (Yandex Cloud Responses API)
 - `src/backend/api/`: API contracts and entrypoints (`facade` and `rag`)
 - `src/eval/`: sample query evaluation

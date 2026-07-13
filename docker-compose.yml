@@ -45,7 +45,7 @@ services:
     env_file:
       - .env
     ports:
-      - "8000:8000"
+      - "8002:8000"
 
   nginx:
     build:
@@ -56,4 +56,4 @@ services:
     environment:
       - AUTH_TOKEN=${AUTH_TOKEN}
     ports:
-      - "80:80"
+      - "82:80"

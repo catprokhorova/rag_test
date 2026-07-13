@@ -51,16 +51,21 @@ class Settings:
         "on",
     }
 
-    # LLM generation (OpenAI-compatible HTTP, e.g. LM Studio)
-    llm_chat_completions_url: str = os.getenv(
-        "LLM_CHAT_COMPLETIONS_URL", None)
-    # Model id for the request (LM Studio: match the loaded model id or a common placeholder).
-    llm_model: str = os.getenv("LLM_MODEL", None)
-    llm_api_key: str | None = os.getenv("LLM_API_KEY") or None
+    # LLM generation (Yandex Cloud AI Studio via OpenAI-compatible Responses API)
+    yandex_cloud_folder: str = os.getenv(
+        "YANDEX_CLOUD_FOLDER", "b1g4o1j024hb54bou17c"
+    )
+    yandex_cloud_api_key: str | None = os.getenv("YANDEX_CLOUD_API_KEY") or None
+    yandex_cloud_model: str = os.getenv(
+        "YANDEX_CLOUD_MODEL", "aliceai-llm-flash/latest"
+    )
+    yandex_cloud_base_url: str = os.getenv(
+        "YANDEX_CLOUD_BASE_URL", "https://ai.api.cloud.yandex.net/v1"
+    )
     llm_request_timeout_s: float = float(os.getenv("LLM_REQUEST_TIMEOUT_S", "120"))
     llm_max_new_tokens: int = int(os.getenv("LLM_MAX_NEW_TOKENS", "256"))
     llm_max_input_tokens: int = int(os.getenv("LLM_MAX_INPUT_TOKENS", "2048"))
-    llm_temperature: float = float(os.getenv("LLM_TEMPERATURE", "0.6"))
+    llm_temperature: float = float(os.getenv("LLM_TEMPERATURE", "0.3"))
 
     # Retrieval
     retrieve_top_k: int = int(os.getenv("RETRIEVE_TOP_K", "8"))

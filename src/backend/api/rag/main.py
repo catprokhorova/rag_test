@@ -5,7 +5,7 @@ import time
 import uuid
 from typing import Dict, List, Optional, Tuple
 
-import httpx
+import openai
 from fastapi import FastAPI, HTTPException
 from langfuse import get_client, observe, propagate_attributes
 
@@ -84,13 +84,19 @@ def _run_chat(req: ChatRequest, session_id: str) -> ChatResponseWithSources:
             history=history,
             language=lang,
         )
-    except httpx.HTTPError as exc:
+    except (openai.APIConnectionError, openai.APITimeoutError) as exc:
         cfg = settings()
         logger.exception("LLM generation failed")
         raise HTTPException(
             status_code=503,
-            detail=f"LLM unreachable at {cfg.llm_chat_completions_url!r}: {exc}",
+            detail=(
+                f"LLM unreachable at {cfg.yandex_cloud_base_url!r} "
+                f"(model=gpt://{cfg.yandex_cloud_folder}/{cfg.yandex_cloud_model}): {exc}"
+            ),
         ) from exc
+    except openai.APIError as exc:
+        logger.exception("LLM generation failed")
+        raise HTTPException(status_code=503, detail=f"LLM generation failed: {exc}") from exc
     except Exception as exc:
         logger.exception("LLM generation failed")
         raise HTTPException(status_code=503, detail=f"LLM generation failed: {exc}") from exc
