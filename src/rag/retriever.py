@@ -3,10 +3,13 @@ from typing import List, Optional
 
 from langchain_core.documents import Document
 from langfuse import observe
-from src.backend.infrastructure.vector_store.qdrant_store import get_vector_store
+from src.backend.infrastructure.vector_store.qdrant_store import (
+    ensure_collection,
+    get_vector_store,
+)
 from src.config import settings
 from src.observability.phoenix_client import retriever_span
-from src.rag.embeddings import get_embeddings
+from src.rag.embeddings import embedding_vector_size, get_embeddings
 
 
 @dataclass(frozen=True)
@@ -51,6 +54,7 @@ class QdrantRetriever:
     ):
         cfg = settings()
         self.embeddings = get_embeddings()
+        ensure_collection(vector_size=embedding_vector_size(self.embeddings))
         self.store = get_vector_store(self.embeddings)
         self.top_k = top_k or cfg.retrieve_top_k
         self.score_threshold = (

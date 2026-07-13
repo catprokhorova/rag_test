@@ -1,11 +1,14 @@
 from uuid import NAMESPACE_URL, UUID, uuid5
 from typing import Optional
+import logging
 
 from langchain_qdrant import QdrantVectorStore
 from qdrant_client import QdrantClient
 from qdrant_client.http import models as qmodels
 
 from src.config import settings
+
+logger = logging.getLogger(__name__)
 
 def qdrant_client_from_settings() -> QdrantClient:
     cfg = settings()
@@ -36,6 +39,11 @@ def ensure_collection(*, vector_size: int, collection_name: Optional[str] = None
                 "Drop the collection or call ingest with recreate_collection=true."
             )
         return
+    logger.info(
+        "Qdrant collection %r not found; creating (vector_size=%s)",
+        name,
+        vector_size,
+    )
     client.create_collection(
         collection_name=name,
         vectors_config=qmodels.VectorParams(
