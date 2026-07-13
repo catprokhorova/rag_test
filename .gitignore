@@ -2,7 +2,6 @@
 **/.DS_Store
 
 # Volumes
-data
 data_dir/
 pdfs/
 qdrant_storage/
