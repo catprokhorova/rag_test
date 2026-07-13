@@ -37,7 +37,7 @@ class ChatResponseWithSources(ChatResponse):
 class IngestRequest(BaseModel):
     pdf_dir: Optional[str] = Field(
         None,
-        description="Directory with LangChain PDF files (defaults to PDF_DIR).",
+        description="Directory with LangChain PDF files (defaults to DATA_DIR / data/).",
     )
     max_pdfs: Optional[int] = Field(
         None, description="Limit PDF files for quick ingestion tests."

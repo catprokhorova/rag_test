@@ -23,13 +23,10 @@ def _optional_float_env(name: str, default: float | None) -> float | None:
 
 @dataclass(frozen=True)
 class Settings:
-    # Local PDF corpus (manual download)
-    pdf_dir: Path = Path(
-        os.getenv("PDF_DIR", str(Path.home() / "Downloads" / "langchain"))
-    )
-
-    # Local storage
+    # Local storage (PDFs live at the root of data_dir; processed/ holds JSONL)
     data_dir: Path = Path(os.getenv("DATA_DIR", "data"))
+    # Override only if PDFs are not under data_dir
+    pdf_dir: Path = Path(os.getenv("PDF_DIR") or os.getenv("DATA_DIR", "data"))
 
     # Qdrant
     qdrant_host: str = os.getenv("QDRANT_HOST", "localhost")

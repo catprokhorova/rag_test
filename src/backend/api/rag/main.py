@@ -216,9 +216,9 @@ def _run_ingest(req: IngestRequest) -> IngestResponse:
     note: Optional[str] = None
     if ingest_outcome.pdfs_processed == 0:
         note = (
-            "No PDF files were parsed (directory empty, wrong PDF_DIR, or all files skipped on resume). "
+            "No PDF files were parsed (data/ empty, wrong pdf_dir, or all files skipped on resume). "
             "indexed_chunks may only reflect re-embedding of existing JSONL. "
-            "Mount or copy PDFs into the container and set PDF_DIR."
+            "Place *.pdf files under data/ (mounted at /data in Docker)."
         )
 
     response = IngestResponse(

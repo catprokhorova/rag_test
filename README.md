@@ -5,7 +5,7 @@ Local RAG chatbot for LangChain/LangGraph documentation: PDF ingestion → Qdran
 ## Requirements
 
 - Python 3.10+
-- LangChain PDFs on disk (manual download; not crawled from the web)
+- LangChain PDFs under `data/` (manual download; not crawled from the web)
 - A **Yandex Cloud** folder + API key with access to AI Studio models
 - Local **Qdrant** (or a reachable Qdrant instance configured in `.env`)
 
@@ -23,9 +23,8 @@ Copy `.env.example` to `.env` and set at least:
 - **`YANDEX_CLOUD_API_KEY`** — Yandex Cloud API key.
 - **`YANDEX_CLOUD_FOLDER`** — cloud folder id (used as `project` and in the `gpt://…` model URI).
 - **`YANDEX_CLOUD_MODEL`** — model id, e.g. `aliceai-llm-flash/latest`.
-- **`PDF_DIR`** — directory containing `*.pdf` files (default: `~/Downloads/langchain`).
 
-Optional: `YANDEX_CLOUD_BASE_URL`, `LLM_REQUEST_TIMEOUT_S`, generation limits (`LLM_MAX_NEW_TOKENS`, etc.). See `.env.example`.
+Optional: `DATA_DIR` (default `data`), `YANDEX_CLOUD_BASE_URL`, `LLM_REQUEST_TIMEOUT_S`, generation limits (`LLM_MAX_NEW_TOKENS`, etc.). See `.env.example`.
 
 ## Run with Docker Compose
 
@@ -35,14 +34,11 @@ Services in `docker-compose.yml`:
 - **`rag`** — PDF ingest, embeddings, retrieval, and Yandex Cloud LLM calls (`8001`)
 - **`backend`** — facade API (`8000`); forwards chat to `rag`
 
-Place PDFs on the host and point Compose at that folder (default mount: `./pdfs` → `/pdfs` in the container):
+Put PDFs in `./data` (mounted at `/data` in the `rag` container):
 
 ```bash
-# Option A: symlink or copy PDFs into ./pdfs
-mkdir -p pdfs && cp ~/Downloads/langchain/*.pdf pdfs/
-
-# Option B: set host path in .env
-# PDF_DIR_HOST=/home/you/Downloads/langchain
+# Example: copy LangChain PDFs into the project data folder
+mkdir -p data && cp ~/Downloads/langchain/*.pdf data/
 ```
 
 Ensure `YANDEX_CLOUD_API_KEY` is set in `.env`, then:
@@ -50,8 +46,6 @@ Ensure `YANDEX_CLOUD_API_KEY` is set in `.env`, then:
 ```bash
 docker compose up --build
 ```
-
-Inside the `rag` container, `PDF_DIR` is `/pdfs` (set in `docker-compose.yml`). Override the host mount with `PDF_DIR_HOST` in `.env`.
 
 Health checks:
 
@@ -62,9 +56,9 @@ curl http://localhost:8001/health
 
 ## 1) Ingest PDFs (offline)
 
-PDFs are parsed with LangChain’s `PagedPDFSplitter` (one document per page), then chunked for RAG.
+PDFs are read from `data/*.pdf`, parsed with LangChain’s `PagedPDFSplitter` (one document per page), then chunked for RAG.
 
-Default input directory: `~/Downloads/langchain` (override with `PDF_DIR` or `--pdf-dir`).
+Override the input directory with `PDF_DIR` or `--pdf-dir` only if needed.
 
 Output files:
 
@@ -81,12 +75,6 @@ Limit files for a smoke test:
 
 ```bash
 python -m src.prep.ingest_docs --max-pdfs 5
-```
-
-Custom PDF directory:
-
-```bash
-python -m src.prep.ingest_docs --pdf-dir /path/to/langchain/pdfs
 ```
 
 ## 2) Index chunks into Qdrant
@@ -117,14 +105,6 @@ curl -X POST http://localhost:8000/admin/ingest \
   -d '{"max_pdfs":50,"resume":true,"recreate_collection":true}'
 ```
 
-With a custom PDF directory inside the container:
-
-```bash
-curl -X POST http://localhost:8000/admin/ingest \
-  -H "Content-Type: application/json" \
-  -d '{"pdf_dir":"/pdfs","resume":false,"recreate_collection":true}'
-```
-
 ## Observability (Langfuse + Phoenix)
 
 The RAG service can send traces to **Langfuse** and **Arize Phoenix** at the same time.
@@ -152,6 +132,7 @@ python -m src.eval.run_eval
 
 ## Project structure
 
+- `data/`: source PDFs (`*.pdf`) and `processed/` chunk JSONL
 - `src/prep/`: PDF ingestion and chunking
 - `src/backend/infrastructure/`: integrations and storage (Qdrant)
 - `src/backend/scripts/`: indexing scripts

@@ -18,7 +18,6 @@ services:
       - QDRANT_PORT=6333
       - QDRANT_COLLECTION=docs_support
       - DATA_DIR=/data
-      - PDF_DIR=/pdfs
       - HF_HOME=/hf
       - TRANSFORMERS_CACHE=/hf/transformers
       - HUGGINGFACE_HUB_CACHE=/hf/hub
@@ -31,8 +30,7 @@ services:
       - "8001:8001"
     volumes:
       - ./hf_cache:/hf
-      - ./data_dir:/data
-      - ${PDF_DIR_HOST:-./pdfs}:/pdfs:ro
+      - ./data:/data
 
   backend:
     build:

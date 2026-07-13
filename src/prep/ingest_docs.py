@@ -1,4 +1,4 @@
-"""Parse local LangChain PDFs and write chunked JSONL for Qdrant indexing."""
+"""Parse LangChain PDFs from data/ and write chunked JSONL for Qdrant indexing."""
 
 from __future__ import annotations
 
@@ -49,7 +49,8 @@ def _save_processed_pdfs(state_path: Path, processed: Set[str]) -> None:
 
 
 def _iter_pdf_paths(pdf_dir: Path) -> List[Path]:
-    return sorted(pdf_dir.glob("*.pdf"))
+    """Top-level *.pdf only (skips data/processed and nested folders)."""
+    return sorted(p for p in pdf_dir.glob("*.pdf") if p.is_file())
 
 
 def _pdf_source_url(pdf_path: Path) -> str:
@@ -106,9 +107,13 @@ def ingest(
     output_jsonl = output_jsonl or (cfg.data_dir / "processed" / "docs_chunks.jsonl")
 
     if not pdf_dir.is_dir():
-        raise FileNotFoundError(f"PDF directory not found: {pdf_dir}")
+        raise FileNotFoundError(
+            f"PDF directory not found: {pdf_dir}. Place *.pdf files under data/."
+        )
 
     pdf_paths = _iter_pdf_paths(pdf_dir)
+    if not pdf_paths:
+        logger.warning("No PDF files found in %s", pdf_dir)
     if max_pdfs is not None:
         pdf_paths = pdf_paths[:max_pdfs]
 
@@ -151,13 +156,13 @@ def ingest(
 def build_argparser() -> argparse.ArgumentParser:
     cfg = settings()
     parser = argparse.ArgumentParser(
-        description="Parse local LangChain PDFs into docs_chunks.jsonl."
+        description="Parse LangChain PDFs from data/ into docs_chunks.jsonl."
     )
     parser.add_argument(
         "--pdf-dir",
         type=Path,
         default=cfg.pdf_dir,
-        help="Directory containing downloaded PDF files.",
+        help="Directory with *.pdf files (default: data/).",
     )
     parser.add_argument(
         "--output-jsonl",
