@@ -129,11 +129,19 @@ def _yandex_responses(
     model_uri = f"gpt://{folder}/{model}"
     instructions, input_text = _split_instructions_and_input(messages)
 
+    # Yandex Cloud prices (RUB incl. VAT), left as-is — not converted to USD.
+    cost_per_1k_input_rub = 0.1
+    cost_per_1k_output_rub = 0.2
+
     langfuse = get_client()
     langfuse.update_current_generation(
         input=messages,
         model=model_uri,
-        metadata={"endpoint": base_url, "folder": folder},
+        metadata={
+            "endpoint": base_url,
+            "folder": folder,
+            "cost_currency": "RUB",
+        },
     )
 
     client = openai.OpenAI(
@@ -156,17 +164,23 @@ def _yandex_responses(
 
     usage = getattr(response, "usage", None)
     usage_details: Dict[str, int] = {}
+    cost_details: Dict[str, float] = {}
     if usage is not None:
         input_tokens = getattr(usage, "input_tokens", None)
         output_tokens = getattr(usage, "output_tokens", None)
         if input_tokens is not None:
-            usage_details["input"] = int(input_tokens)
+            n_in = int(input_tokens)
+            usage_details["input"] = n_in
+            cost_details["input"] = n_in / 1000.0 * cost_per_1k_input_rub
         if output_tokens is not None:
-            usage_details["output"] = int(output_tokens)
+            n_out = int(output_tokens)
+            usage_details["output"] = n_out
+            cost_details["output"] = n_out / 1000.0 * cost_per_1k_output_rub
 
     langfuse.update_current_generation(
         output=content,
         usage_details=usage_details or None,
+        cost_details=cost_details or None,
     )
     return str(content).strip()
 
