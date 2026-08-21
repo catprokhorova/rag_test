@@ -127,7 +127,7 @@ def _backend_health() -> tuple[bool, str]:
         return False, f"Cannot reach backend: {exc}"
 
 
-def _send_chat(message: str) -> str:
+def _send_chat(message: str) -> tuple[str, list[dict]]:
     payload = {
         "session_id": st.session_state.session_id,
         "message": message,
@@ -140,7 +140,50 @@ def _send_chat(message: str) -> str:
         raise RuntimeError(f"Chat failed ({response.status_code}): {detail}")
     data = response.json()
     st.session_state.session_id = data.get("session_id") or st.session_state.session_id
-    return data["answer"]
+    return data["answer"], data.get("sources") or []
+
+
+def _unique_sources(sources: list[dict]) -> list[dict]:
+    unique: list[dict] = []
+    seen: set[tuple] = set()
+    for source in sources:
+        key = (
+            source.get("title") or "",
+            source.get("source_file") or "",
+            source.get("page"),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(source)
+    return unique
+
+
+def _source_label(source: dict) -> str:
+    label = source.get("source_file") or source.get("title") or "Source"
+    page = source.get("page")
+    if page is not None:
+        try:
+            # PagedPDFSplitter stores 0-based page numbers.
+            label = f"{label}, p. {int(page) + 1}"
+        except (TypeError, ValueError):
+            pass
+    return label
+
+
+def _render_sources(sources: list[dict]) -> None:
+    unique = _unique_sources(sources)
+    if not unique:
+        return
+    lines = ["**Sources**"]
+    for source in unique:
+        label = _source_label(source)
+        url = (source.get("url") or "").strip()
+        if url.startswith(("http://", "https://")):
+            lines.append(f"- [{label}]({url})")
+        else:
+            lines.append(f"- {label}")
+    st.markdown("\n".join(lines))
 
 
 def _render_sidebar() -> None:
@@ -207,6 +250,8 @@ def main() -> None:
     for item in st.session_state.messages:
         with st.chat_message(item["role"]):
             st.markdown(item["content"])
+            if item["role"] == "assistant":
+                _render_sources(item.get("sources") or [])
 
     prompt = _consume_prompt()
     if not prompt:
@@ -216,15 +261,19 @@ def main() -> None:
     with st.chat_message("user"):
         st.markdown(prompt)
 
+    sources: list[dict] = []
     with st.chat_message("assistant"):
         with st.spinner("Retrieving and generating an answer…"):
             try:
-                answer = _send_chat(prompt)
+                answer, sources = _send_chat(prompt)
             except Exception as exc:
                 answer = f"Sorry, the chat request failed.\n\n`{exc}`"
         st.markdown(answer)
+        _render_sources(sources)
 
-    st.session_state.messages.append({"role": "assistant", "content": answer})
+    st.session_state.messages.append(
+        {"role": "assistant", "content": answer, "sources": sources}
+    )
 
 
 if __name__ == "__main__":

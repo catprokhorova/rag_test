@@ -21,6 +21,8 @@ class SourceItem(BaseModel):
     chunk_id: str
     chunk_index: int
     score: float
+    source_file: str = ""
+    page: Optional[int] = None
 
 
 class ChatResponse(BaseModel):

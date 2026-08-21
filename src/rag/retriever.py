@@ -33,16 +33,25 @@ class RetrievedContext:
         return "\n\n".join(parts).strip()
 
     def sources(self) -> List[dict]:
-        return [
-            {
-                "title": str(doc.metadata.get("page_title") or ""),
-                "url": str(doc.metadata.get("url") or ""),
-                "chunk_id": str(doc.metadata.get("chunk_id") or ""),
-                "chunk_index": int(doc.metadata.get("chunk_index") or 0),
-                "score": score,
-            }
-            for doc, score in zip(self.documents, self.scores)
-        ]
+        items: List[dict] = []
+        for doc, score in zip(self.documents, self.scores):
+            raw_page = doc.metadata.get("page")
+            try:
+                page = int(raw_page) if raw_page is not None and raw_page != "" else None
+            except (TypeError, ValueError):
+                page = None
+            items.append(
+                {
+                    "title": str(doc.metadata.get("page_title") or ""),
+                    "url": str(doc.metadata.get("url") or ""),
+                    "chunk_id": str(doc.metadata.get("chunk_id") or ""),
+                    "chunk_index": int(doc.metadata.get("chunk_index") or 0),
+                    "score": score,
+                    "source_file": str(doc.metadata.get("source_file") or ""),
+                    "page": page,
+                }
+            )
+        return items
 
 
 class QdrantRetriever:

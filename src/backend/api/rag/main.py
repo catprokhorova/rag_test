@@ -121,6 +121,8 @@ def _run_chat(req: ChatRequest, session_id: str) -> ChatResponseWithSources:
                 "chunk_id": source["chunk_id"],
                 "chunk_index": source["chunk_index"],
                 "score": source["score"],
+                "source_file": source.get("source_file") or "",
+                "page": source.get("page"),
             }
             for source in sources
         ],
