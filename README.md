@@ -14,6 +14,7 @@ Install dependencies:
 ```bash
 pip install -r requirements.rag.txt
 pip install -r requirements.backend.txt
+pip install -r requirements.frontend.txt
 ```
 
 ### LLM configuration
@@ -32,7 +33,8 @@ Services in `docker-compose.yml`:
 
 - **`qdrant`** — vector database
 - **`rag`** — PDF ingest, embeddings, retrieval, and Yandex Cloud LLM calls (`8001`)
-- **`backend`** — facade API (`8000`); forwards chat to `rag`
+- **`backend`** — facade API (`8002` on the host → `8000` in the container); forwards chat to `rag`
+- **`frontend`** — Streamlit chat UI (`8501`); calls the facade `/chat` API
 
 Put PDFs in `./data` (mounted at `/data` in the `rag` container):
 
@@ -50,9 +52,11 @@ docker compose up --build
 Health checks:
 
 ```bash
-curl http://localhost:8000/health
+curl http://localhost:8002/health
 curl http://localhost:8001/health
 ```
+
+Open the chat UI at [http://localhost:8501](http://localhost:8501).
 
 ## 1) Ingest PDFs (offline)
 
@@ -105,6 +109,22 @@ curl -X POST http://localhost:8000/admin/ingest \
   -d '{"max_pdfs":50,"resume":true,"recreate_collection":true}'
 ```
 
+## 4) Run Streamlit UI
+
+With the facade API already running:
+
+```bash
+streamlit run src/frontend/app.py
+```
+
+Open [http://localhost:8501](http://localhost:8501). The UI uses a light gray + mustard yellow theme and keeps a `session_id` so the backend can continue the conversation.
+
+Point it at a different API (for example Docker’s published backend port):
+
+```bash
+BACKEND_URL=http://localhost:8002 streamlit run src/frontend/app.py
+```
+
 ## Observability (Langfuse + Phoenix)
 
 The RAG service can send traces to **Langfuse** and **Arize Phoenix** at the same time.
@@ -138,4 +158,5 @@ python -m src.eval.run_eval
 - `src/backend/scripts/`: indexing scripts
 - `src/rag/`: embeddings, retriever, generator (Yandex Cloud Responses API)
 - `src/backend/api/`: API contracts and entrypoints (`facade` and `rag`)
+- `src/frontend/`: Streamlit chat UI
 - `src/eval/`: sample query evaluation

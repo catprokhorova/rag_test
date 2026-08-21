@@ -45,6 +45,17 @@ services:
     ports:
       - "8002:8000"
 
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    depends_on:
+      - backend
+    environment:
+      - BACKEND_URL=http://backend:8000
+    ports:
+      - "8501:8501"
+
   nginx:
     build:
       context: .
