@@ -11,8 +11,8 @@ import streamlit as st
 BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000").rstrip("/")
 CHAT_TIMEOUT_S = float(os.getenv("FRONTEND_CHAT_TIMEOUT_S", "120"))
 
-MUSTARD = "#C9A227"
-MUSTARD_DARK = "#8B7319"
+MUSTARD = "#FFBF00"
+MUSTARD_DARK = "#FFBF00"
 GRAY_BG = "#F3F2EF"
 GRAY_PANEL = "#E8E6E0"
 INK = "#2B2B28"
