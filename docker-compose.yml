@@ -21,9 +21,7 @@ services:
       - HF_HOME=/hf
       - TRANSFORMERS_CACHE=/hf/transformers
       - HUGGINGFACE_HUB_CACHE=/hf/hub
-      - EMBED_LOCAL_FILES_ONLY=1
-      - TRANSFORMERS_OFFLINE=1
-      - HF_HUB_OFFLINE=1
+      - EMBED_LOCAL_FILES_ONLY=0
     env_file:
       - .env
     ports:
@@ -44,6 +42,19 @@ services:
       - .env
     ports:
       - "8002:8000"
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    depends_on:
+      - backend
+    environment:
+      - BACKEND_URL=http://backend:8000
+    ports:
+      - "8501:8501"
+    volumes:
+      - ./src/frontend:/app/src/frontend
 
   nginx:
     build:

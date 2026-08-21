@@ -7,7 +7,7 @@ from fastapi import FastAPI, HTTPException
 
 from src.backend.api.contracts.schemas import (
     ChatRequest,
-    ChatResponse,
+    ChatResponseWithSources,
     IngestRequest,
     IngestResponse,
 )
@@ -21,8 +21,8 @@ RAG_BASE_URL = os.getenv("RAG_BASE_URL", "http://rag:8001").rstrip("/")
 def health() -> dict:
     return {"status": "ok", "rag_base_url": RAG_BASE_URL}
 
-@app.post("/chat", response_model=ChatResponse)
-def chat(req: ChatRequest) -> ChatResponse:
+@app.post("/chat", response_model=ChatResponseWithSources)
+def chat(req: ChatRequest) -> ChatResponseWithSources:
     session_id = req.session_id or str(uuid.uuid4())
     payload = {
         "session_id": session_id,
@@ -42,13 +42,19 @@ def chat(req: ChatRequest) -> ChatResponse:
         )
 
     data = response.json()
-    sources = data.get("sources") or []
+    chat_response = ChatResponseWithSources.model_validate(
+        {
+            "session_id": data.get("session_id") or session_id,
+            "answer": data["answer"],
+            "sources": data.get("sources") or [],
+        }
+    )
     logger.info(
         "chat retrieval session_id=%s chunk_ids=%s",
-        session_id,
-        [source.get("chunk_id") for source in sources],
+        chat_response.session_id,
+        [source.chunk_id for source in chat_response.sources],
     )
-    return ChatResponse(session_id=session_id, answer=data["answer"])
+    return chat_response
 
 @app.post("/admin/ingest", response_model=IngestResponse)
 def admin_ingest(req: IngestRequest) -> IngestResponse:
